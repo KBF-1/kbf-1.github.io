@@ -42,7 +42,12 @@ async function pantallaAcceso(aviso) {
   nav.hidden = true; mount(cuenta);
   mount(main, h('p', { class: 'gris' }, 'Cargando…'));
   let listo = true;
-  try { listo = await API.configurado(); } catch (e) { /* sin conexión: se muestra el acceso normal */ }
+  try { listo = await API.configurado(); }
+  catch (e) {
+    // Sin permiso para leer lc_config/inicio = faltan las reglas «lc_» en Firebase (o no hay conexión).
+    if (/permission/i.test((e && e.code) || '')) aviso = 'Firebase no tiene publicadas las reglas de Control de Embarques (bloque «lc_» de firestore.rules). Publícalas y recarga la página.';
+    else if (!aviso) aviso = 'No se pudo revisar la configuración (¿sin conexión?).';
+  }
   if (!listo) { configuracionInicial(); return; }
   let area = localStorage.getItem('lc-area') || '';
   const clave = entrada({ type: 'password', autocomplete: 'current-password', required: true, id: 'clave' });
