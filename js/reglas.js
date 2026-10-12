@@ -82,3 +82,30 @@ export const esLigaCorta = (t) => /^(https?:\/\/)?(maps\.app\.goo\.gl|goo\.gl\/m
 
 const norm = (s) => String(s === null || s === undefined ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
 export { norm };
+
+/* Motivos (del catálogo del Seguimiento Integral Logística). */
+export const MOTIVOS_REPROGRAMACION = ['Falla mecánica', 'Cancelación de la transportadora', 'Demora de la transportadora', 'Cancelación de folio de embarque',
+  'No se consiguió transporte', 'Cambio de fecha de recepción del cliente', 'Cambio de destino', 'Cita', 'Clima', 'Tráfico', 'Trámite de permiso', 'Otro'];
+export const INCIDENCIAS = {
+  'Facturación': ['Incidencia facturación', 'Error en facturación', 'Cancelación de factura', 'No se timbró factura', 'Firma de factura electrónica', 'Falta de factura electrónica',
+    'Se pide refacturación', 'Complemento de factura', 'Precios en 0', 'Espera de factura'],
+  'Orden / sistema': ['Negativo en orden', 'Orden bloqueada', 'Problemas con sistema', 'Folio duplicado', 'Falta de folio', 'Modificación de folio', 'Anticipo', 'Liberación de consigna'],
+  'Material': ['Inexistencia', 'Agregado', 'Dan de alta material faltante', 'Cambio de calibre', 'Cambio de tono', 'Cambio de formato', 'Cambio de color', 'Cambio de lote',
+    'Producto cambiado', 'Producto dañado', 'Producto incompleto', 'Falta de exhibición', 'Falta hoja de exhibición', 'Falta de material en hoja de revisión'],
+  'Documentos': ['Incidencia carta porte', 'Falta carta porte transportista', 'Complemento carta porte', 'Error en documentos', 'Fecha errónea en documentos', 'Nombre erróneo',
+    'Falta de salida', 'Falta salidas de consigna', 'Tardanza en traer papeles de carga'],
+  'Embarque / carga': ['Incidencia embarque', 'Incidencia de carga', 'Pesos y dimensiones', 'Demora por app', 'Detenido por distribución', 'En espera de 17 puntos', 'Falta órdenes seguro'],
+  'Transporte / entrega': ['Retraso', 'Falla', 'Enfermedad', 'Problemas con cita', 'Incumplimiento de transporte', 'Cliente no recibe', 'Negligencia', 'Confirmación de dirección',
+    'Confirmación de tarifa', 'Cambio de destino'],
+  'Otro': ['Otro']
+};
+/* ¿Se entregó a tiempo? Compara la entrega con la cita (o, sin cita, con la salida + días de tránsito). */
+export function puntualidad(f, diasTransito) {
+  if (f.estatus !== 'ENTREGADO' || !f.entregado) return null;
+  let limite = f.cita ? new Date(f.cita.length <= 10 ? f.cita + 'T23:59' : f.cita) : null;
+  if (!limite && f.salida && diasTransito) { limite = new Date(f.salida); limite.setDate(limite.getDate() + Number(diasTransito)); limite.setHours(23, 59, 0, 0); }
+  if (!limite || isNaN(limite)) return null;
+  // Margen del mismo día: si la cita era a las 9:00 y se entregó ese día, cuenta como a tiempo.
+  const fin = new Date(limite); fin.setHours(23, 59, 59, 999);
+  return new Date(f.entregado) <= fin ? 'A tiempo' : 'Tarde';
+}

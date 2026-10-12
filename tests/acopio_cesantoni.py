@@ -21,7 +21,7 @@ tit = ['Número orden', 'Tp ord', 'Número principal', 'Venta', 'Destino envío'
 for i, t in enumerate(tit): b.cell(6, i + 1, t)
 def fila(orden, dest, ciudad, suc, kgs, tar, liso, deco):
     r = {t: '' for t in tit}
-    r.update({'Número orden': orden, 'Destino envío': dest, 'Nombre venta': 'CLIENTE PRUEBA', 'Cant enviada': 10, 'Kg.': kgs, 'Destino': ciudad,
+    r.update({'2º nº artículo': 'SKU-' + str(orden), 'Número orden': orden, 'Destino envío': dest, 'Nombre venta': 'CLIENTE PRUEBA', 'Cant enviada': 10, 'Kg.': kgs, 'Destino': ciudad,
               'Tarimas': tar, 'Restos tarima - liso': liso, 'Restos tarima - deco': deco, 'Cliente': 'CLIENTE PRUEBA SA DE CV',
               'Nom Sucursal': suc, 'Cd Sucursal': ciudad, 'Mts': 100})
     b.append([r[t] for t in tit])

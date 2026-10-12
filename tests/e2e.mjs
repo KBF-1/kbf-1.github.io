@@ -11,6 +11,8 @@ const CUADRO = process.env.CUADRO || fileURLToPath(new URL('./cuadro-envio.xlsm'
 const CUADRO2 = process.env.CUADRO2 || fileURLToPath(new URL('./cuadro-envio-2.xlsm', import.meta.url));
 const SEGUIMIENTO = process.env.SEGUIMIENTO || fileURLToPath(new URL('./seguimiento-ejemplo.xlsx', import.meta.url));
 const FLETES = process.env.FLETES || fileURLToPath(new URL('./fletes-ejemplo.xlsx', import.meta.url));
+const ACOPIO_MOD1 = process.env.ACOPIO_MOD1 || fileURLToPath(new URL('./acopio-mod-1.xlsm', import.meta.url));
+const ACOPIO_MOD2 = process.env.ACOPIO_MOD2 || fileURLToPath(new URL('./acopio-mod-2.xlsm', import.meta.url));
 const SALIDA = process.env.CAPTURAS || '';
 let ok = 0, mal = 0;
 const check = (cond, nombre) => { if (cond) { ok++; console.log('  ✓ ' + nombre); } else { mal++; console.log('  ✗ ' + nombre); } };
@@ -142,8 +144,10 @@ const prohibido = await page.evaluate(async () => {
 check(prohibido === 'permission-denied', 'Ventas pidiendo despachos (tarifas) directo al servidor: denegado');
 // Subir el mismo archivo otra vez no duplica
 await page.locator('#acopio').setInputFiles(ACOPIO);
-await page.getByRole('button', { name: /Crear 4 folio/ }).click();
-await esperarToast('Ya existían');
+await page.locator('.modificacion.igual').first().waitFor();
+check(await page.locator('.modificacion.igual').count() === 4, 'volver a subir el mismo acopio: lo reconoce como folio existente sin cambios');
+await page.getByRole('button', { name: /Modificar 4/ }).click();
+await esperarToast('el acopio no cambió');
 check(true, 'volver a subir el acopio no duplica folios');
 // Formato de Acopio CESANTONI: dos archivos a la vez y juntarlos en un embarque
 await page.locator('#acopio').setInputFiles([ACOPIO_CES, ACOPIO_CES2]);
@@ -164,6 +168,16 @@ check(await page.locator('.modal .material tbody tr').count() === 6, 'la ficha d
 await page.locator('.modal .historial li', { hasText: 'ventas@cesantoni.com.mx' }).first().waitFor();
 check(true, 'el historial registra quién (correo), no solo el área');
 await page.locator('.modal .btn-x').click();
+// Modificación de acopio: el mismo folio con otra cantidad (7777A todavía no existe solo; se crea y luego se modifica)
+await page.locator('#acopio').setInputFiles(ACOPIO_MOD1);
+await page.getByRole('button', { name: /Crear 1 folio/ }).click();
+await page.locator('.tabla tbody tr', { hasText: '6666' }).first().waitFor(); // lista ya recargada
+await page.locator('#acopio').setInputFiles(ACOPIO_MOD2);
+await page.locator('.modificacion.aplica').waitFor();
+check(await page.locator('.modificacion .cambios li.sube', { hasText: '10 → 15' }).count() === 1, 'modificación: muestra «Se sube 10 → 15»');
+await page.getByRole('button', { name: /Modificar 1/ }).click();
+await esperarToast('modificado (versión 2)');
+check(true, 'modificación aplicada (versión 2) sin duplicar el folio');
 // Cuadros de Envío (Última Milla)
 await page.locator('#acopio').setInputFiles([CUADRO, CUADRO2]);
 await page.getByRole('button', { name: /Crear 2 folio/ }).waitFor();
@@ -200,6 +214,17 @@ await fila('40001').getByLabel('Motivo').fill('Falta exhibidor');
 await fila('40001').getByRole('button', { name: 'Guardar' }).click();
 await esperarToast('40001: Parado');
 check(true, 'PARADO con motivo guardado');
+// Incidencia registrada por Operación desde la ficha
+await fila('30010/30011').locator('td').first().click();
+await page.getByRole('button', { name: '+ Registrar incidencia' }).click();
+await page.locator('#inc-categoria').selectOption('Material');
+await page.locator('#inc-motivo').selectOption('Inexistencia');
+await page.locator('#inc-detalle').fill('Faltan 3 cajas');
+await page.getByRole('button', { name: 'Registrar', exact: true }).click();
+await esperarToast('Incidencia registrada en 30010/30011');
+check(true, 'Operación registra una incidencia en un folio');
+check(await page.getByRole('button', { name: 'Reprogramar' }).count() === 0, 'Operación no puede reprogramar');
+await page.locator('.tabla tbody tr').first().waitFor();
 for (const d of ['Factura', 'Carta Porte', 'Remisión']) { await fila('12345/12346').getByLabel(d).check(); await page.waitForTimeout(600); }
 await fila('12345/12346').locator('select').selectOption('LISTO');
 await esperarToast('Listo para transporte');
@@ -208,7 +233,7 @@ await salir();
 
 console.log('Transporte');
 await entrar('transporte@cesantoni.com.mx');
-check((await menu()).length === 9, 'Transporte ve todo (igual que Administrador)');
+check((await menu()).length === 10, 'Transporte ve todo (igual que Administrador)');
 await ir('transporte', 'Transporte');
 await page.locator('.tabla tbody tr', { hasText: '22001' }).click();
 await page.getByLabel('Unidad', { exact: true }).selectOption({ label: 'Fletes del Bajío · ECO-14 · SENCILLO · 30 t' });
@@ -232,6 +257,14 @@ await esperarToast('Asignación guardada');
 const celdaTarifa = page.locator('.tabla tbody tr', { hasText: '22001' }).locator('td', { hasText: '$18,500.00' });
 await celdaTarifa.waitFor({ timeout: 10000 }).catch(() => {});
 check(await celdaTarifa.count() === 1, 'tarifa visible para Transporte');
+await page.locator('.tabla tbody tr', { hasText: '22001' }).click();
+await page.getByRole('button', { name: 'Reprogramar (con motivo)' }).click();
+await page.locator('#rep-motivo').selectOption('Demora de la transportadora');
+await page.locator('#rep-cita').fill('2026-10-14T10:00');
+await page.getByRole('button', { name: 'Reprogramar', exact: true }).click();
+await esperarToast('22001 reprogramado');
+await page.locator('.tabla tbody tr', { hasText: '22001' }).locator('td', { hasText: '14 oct 10:00' }).waitFor();
+check(true, 'Transporte reprograma con motivo y nueva cita');
 await page.locator('.tabla tbody tr', { hasText: '22001' }).click();
 await page.getByRole('button', { name: 'Salir a ruta (activar GPS)' }).click();
 await esperarToast('en ruta');
@@ -315,8 +348,25 @@ check(!/CLIENTE DE PRUEBA|PERSONA DE PRUEBA|AV\. DE PRUEBA|000 000 0000/.test(aw
 check(await pan.locator('#filas tr.c-rojo').count() === 1, 'el folio parado sale en rojo');
 if (SALIDA) await pan.screenshot({ path: SALIDA + '/07-pantalla.png' });
 
-console.log('Borrar folio (Administrador)');
+console.log('Entrega a tiempo e Incidencias');
 await page.bringToFront();
+await entrar('transporte@cesantoni.com.mx');
+await ir('transporte', 'Transporte');
+await page.getByRole('tab', { name: /^Nacional/ }).click();
+// Entregar 22001 (cita 14 oct, entregado hoy → a tiempo) y revisar la vista de Incidencias
+await page.getByRole('tab', { name: /^En ruta/ }).click();
+await page.locator('.tabla tbody tr', { hasText: '22001' }).click();
+await page.getByRole('button', { name: 'Marcar entregado' }).click();
+await esperarToast('22001 entregado');
+await ir('incidencias', 'Incidencias');
+await page.locator('main select[aria-label="Mes"]').selectOption('todos');
+const txtInc = await page.locator('main').innerText();
+check(/Demora de la transportadora/.test(txtInc) && /Inexistencia/.test(txtInc), 'Incidencias: lista reprogramaciones e incidencias con su motivo');
+check(/100%/.test(txtInc), 'Incidencias: % de entregas a tiempo');
+
+await salir();
+
+console.log('Borrar folio (Administrador)');
 await entrar('ventas@cesantoni.com.mx');
 await page.locator('.tabla tbody tr', { hasText: '30010/30011' }).first().click();
 check(await page.getByRole('button', { name: 'Borrar folio' }).count() === 0, 'Ventas no ve el botón de borrar');

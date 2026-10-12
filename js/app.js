@@ -1,19 +1,19 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
-import * as API from './datos.js?v=15';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=15';
-import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=15';
-import { leerLibro, interpretar, combinar } from './acopio.js?v=15';
-import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara, unirTransportista } from './catalogos.js?v=15';
-import { planear } from './ruta.js?v=15';
-import { ubicacion } from './gps.js?v=15';
-import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=15';
+import * as API from './datos.js?v=17';
+import { MOTIVOS_REPROGRAMACION, INCIDENCIAS, puntualidad, ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=17';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=17';
+import { leerLibro, interpretar, combinar, compararFolio } from './acopio.js?v=17';
+import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara, unirTransportista } from './catalogos.js?v=17';
+import { planear } from './ruta.js?v=17';
+import { ubicacion } from './gps.js?v=17';
+import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=17';
 
 const CFG = window.LC_CONFIG;
 const main = document.getElementById('main'), nav = document.getElementById('nav'), cuenta = document.getElementById('cuenta');
 
 /* Qué ve cada área. Transporte ve todo, igual que Administrador (solo las contraseñas son del Administrador). */
-const TODO = ['ventas', 'operacion', 'transporte', 'monitoreo', 'ruta', 'catalogos', 'alertas', 'config'];
+const TODO = ['ventas', 'operacion', 'transporte', 'monitoreo', 'ruta', 'incidencias', 'catalogos', 'alertas', 'config'];
 const VISTAS = { ventas: ['ventas', 'alertas'], operacion: ['operacion', 'alertas'], transporte: TODO, admin: TODO };
 const MENU = {
   ventas: ['Ventas', 'Subir el Formato de Acopio'],
@@ -22,6 +22,7 @@ const MENU = {
   monitoreo: ['Monitoreo', 'Unidades en ruta (GPS)'],
   ruta: ['Última Milla', 'Ruta más corta de reparto'],
   catalogos: ['Catálogos', 'Unidades y destinos'],
+  incidencias: ['Incidencias', 'Reprogramaciones y cumplimiento'],
   alertas: ['Alertas', 'Avisos del sistema'],
   config: ['Configuración', 'Usuarios, origen y GPS']
 };
@@ -119,7 +120,7 @@ function irA(vista) {
   if (!permitidas.includes(vista)) { location.replace('#' + permitidas[0]); return; }
   pintarMenu(vista);
   mount(main, h('p', { class: 'gris' }, 'Cargando…'));
-  ({ ventas, operacion, transporte, monitoreo, ruta, catalogos, alertas, config })[vista]().catch(fallo);
+  ({ ventas, operacion, transporte, monitoreo, ruta, incidencias, catalogos, alertas, config })[vista]().catch(fallo);
 }
 function fallo(e) {
   const msg = API.amigable(e);
@@ -172,6 +173,8 @@ function tabla(lista, columnas, alClic, vacio, sinFiltroEnvio) {
 /* Ficha del folio: datos, documentos e historial. */
 async function ficha(f) {
   const hist = h('ul', { class: 'historial' }, h('li', { class: 'gris' }, 'Cargando…'));
+  const incs = h('ul', { class: 'historial' }, h('li', { class: 'gris' }, 'Cargando…'));
+  API.incidenciasDe(f).then((r) => mount(incs, r.length ? r.map(lineaIncidencia) : h('li', { class: 'gris' }, 'Sin incidencias.'))).catch((e) => mount(incs, h('li', { class: 'gris' }, API.amigable(e))));
   modal('Folio ' + f.folio,
     h('div', { class: 'ficha' },
       dato('Estatus', pill(f.estatus)), dato('Envío', envioChip(f)), dato('Cliente', f.cliente), dato('Destino', f.destino || '—'),
@@ -186,6 +189,9 @@ async function ficha(f) {
     f.entrega ? [h('h3', null, 'Entrega (Última Milla)'), bloqueEntrega(f)] : null,
     f.paradas && f.paradas.length ? [h('h3', null, 'Destinos de envío'), h('div', { class: 'tabla-scroll' }, tablaParadas(f.paradas))] : null,
     f.material && f.material.length ? [h('h3', null, 'Material (' + f.material.length + ' partidas)'), tablaMaterial(f.material)] : null,
+    h('h3', null, 'Incidencias y reprogramaciones'), incs,
+    h('div', { class: 'acciones' }, h('button', { class: 'btn chico', type: 'button', onclick: () => dialogoIncidencia(f) }, '+ Registrar incidencia'),
+      puede('transporte', 'admin') && !['ENTREGADO'].includes(f.estatus) ? h('button', { class: 'btn chico', type: 'button', onclick: () => dialogoReprogramar(f) }, 'Reprogramar') : null),
     h('h3', null, 'Historial'), hist,
     puede('admin') ? h('div', { class: 'acciones separado' }, h('button', { class: 'btn peligro', type: 'button', onclick: (e) => borrarFolio(f, e.currentTarget) }, 'Borrar folio')) : null);
   try { const r = await API.historial(f.id); mount(hist, r.length ? r.map((x) => h('li', null, h('b', null, fecha(x.fecha)), ' · ', CFG.areas[x.area] ? CFG.areas[x.area].nombre : x.area, x.por ? ' (' + x.por + ')' : '', ' — ', x.texto)) : h('li', { class: 'gris' }, 'Sin movimientos.')); }
@@ -270,7 +276,7 @@ async function ventas() {
         r.avisos.forEach((a) => avisos.push(f.name + ': ' + a));
       } catch (e) { avisos.push(f.name + ': ' + e.message); }
     }
-    mostrarPrevia(previa, grupos, avisos, archivos.length === 1 ? archivos[0].name : archivos.length + ' archivos');
+    mostrarPrevia(previa, grupos, avisos, archivos.length === 1 ? archivos[0].name : archivos.length + ' archivos', lista);
     archivo.value = '';
   });
   mount(main, vista);
@@ -288,6 +294,17 @@ async function ventas() {
         ['Estatus', (f) => pill(f.estatus)], ['Alta', (f) => fecha(f.creado)]
       ], ficha)));
 }
+/* Qué cambia en una modificación de acopio (folio que ya existe). */
+function bloqueModificacion({ ex, dif, aplica }) {
+  const NOM = { sube: 'Se sube', baja: 'Se baja', nueva: 'Nueva', quitada: 'Se quita' };
+  return h('div', { class: 'modificacion ' + (dif.igual ? 'igual' : aplica ? 'aplica' : 'no-aplica') },
+    h('b', null, dif.igual ? 'El folio ' + ex.folio + ' ya existe y el acopio no cambió.'
+      : aplica ? 'Modificación del folio ' + ex.folio + ' (está ' + ESTATUS[ex.estatus].nombre + ', versión ' + (Number(ex.version) || 1) + ' → ' + ((Number(ex.version) || 1) + 1) + ')'
+        : 'El folio ' + ex.folio + ' ya está ' + ESTATUS[ex.estatus].nombre + ': la modificación NO se aplica; se registra una alerta.'),
+    dif.igual ? null : h('p', { class: 'chico' }, dif.resumen.split(' · ').filter((x) => !/→\d/.test(x) || /kg|tarimas|restos/.test(x)).join(' · ')),
+    dif.lineas.length ? h('ul', { class: 'cambios' }, dif.lineas.map((l) => h('li', { class: l.tipo }, h('b', null, NOM[l.tipo]), ' · ', l.producto, ' · ', l.antes + ' → ' + l.despues + ' ' + (l.um || '')))) : null,
+    !dif.igual && aplica && Object.values(ex.docs || {}).some(Boolean) ? h('p', { class: 'gris chico' }, 'Ya tenía documentos entregados: se avisará a Operación para revisar factura y carta porte.') : null);
+}
 /* Detalle por destino de envío (sucursal). */
 function tablaParadas(paradas) {
   if (!paradas || !paradas.length) return null;
@@ -297,8 +314,11 @@ function tablaParadas(paradas) {
       h('td', { class: 'num' }, String(p.tarimas)), h('td', { class: 'num' }, (Number(p.restos_liso) || 0) + (Number(p.restos_deco) || 0) ? (p.restos_liso || 0) + ' liso · ' + (p.restos_deco || 0) + ' deco' : '—'),
       h('td', { class: 'num' }, kg(p.peso_kg)), h('td', { class: 'num' }, p.m2 ? String(p.m2) : '—')))));
 }
-function mostrarPrevia(destino, grupos, avisos, nombre) {
+function mostrarPrevia(destino, grupos, avisos, nombre, existentes) {
   const filas = grupos.map((g) => Object.assign({ incluir: true }, g));
+  // Si el folio ya existe, es una modificación del acopio: se compara con lo guardado.
+  const existente = (r) => (existentes || []).find((f) => f.id === API.idDe(r));
+  const cambio = (r) => { const ex = existente(r); return ex ? { ex, dif: compararFolio(ex, r), aplica: API.MODIFICABLE.includes(ex.estatus) } : null; };
   const cuerpo = h('tbody'), total = h('p', { class: 'gris' });
   const btn = h('button', { class: 'btn primario', type: 'button' }, 'Crear folios');
   const juntar = h('button', { class: 'btn', type: 'button', title: 'Para folios que viajan en la misma unidad' }, 'Juntar marcados en un embarque');
@@ -315,7 +335,9 @@ function mostrarPrevia(destino, grupos, avisos, nombre) {
         h('td', null, num('tarimas', 0.01)), h('td', null, num('resto', 1)), h('td', null, num('peso_kg', 1)),
         h('td', null, h('b', { class: r.tipo_unidad === 'FULL' ? 'tipo full' : 'tipo' }, r.tipo_unidad)),
         h('td', null, h('button', { class: 'btn-x', 'aria-label': 'Quitar renglón', onclick: () => { filas.splice(i, 1); pintar(); } }, '×')));
-      const det = (r.paradas && r.paradas.length) || r.entrega ? h('tr', { class: 'detalle' + (r.incluir ? '' : ' apagado') }, h('td'), h('td', { colspan: 8 },
+      const c = cambio(r);
+      const det = (r.paradas && r.paradas.length) || r.entrega || c ? h('tr', { class: 'detalle' + (r.incluir ? '' : ' apagado') }, h('td'), h('td', { colspan: 8 },
+        c ? bloqueModificacion(c) : null,
         h('small', { class: 'gris' }, [envioChip(r), ' ', [r.archivo, (r.hojas || []).length ? 'hojas ' + r.hojas.join(', ') : '', r.material && r.material.length ? r.material.length + ' partidas' : '', r.m2 ? r.m2 + ' m²' : ''].filter(Boolean).join(' · ')]),
         r.entrega ? bloqueEntrega(r) : null,
         tablaParadas(r.paradas),
@@ -323,8 +345,9 @@ function mostrarPrevia(destino, grupos, avisos, nombre) {
       return [fila, det].filter(Boolean);
     }));
     const sel = filas.filter((r) => r.incluir);
+    const nMod = sel.filter((r) => existente(r)).length;
     total.textContent = sel.length + ' folio(s) · ' + kg(sel.reduce((t, r) => t + (Number(r.peso_kg) || 0), 0)) + ' · ' + sel.reduce((t, r) => t + (Number(r.tarimas) || 0), 0) + ' tarimas';
-    btn.textContent = 'Crear ' + sel.length + ' folio(s)';
+    btn.textContent = [sel.length - nMod ? 'Crear ' + (sel.length - nMod) + ' folio(s)' : '', nMod ? 'Modificar ' + nMod : ''].filter(Boolean).join(' · ') || 'Crear 0 folio(s)';
     btn.disabled = !sel.length;
     juntar.hidden = sel.length < 2;
   };
@@ -346,10 +369,24 @@ function mostrarPrevia(destino, grupos, avisos, nombre) {
     const dup = sel.map((r) => r.folio).find((f, i, a) => a.indexOf(f) !== i);
     if (dup) { toast('El folio ' + dup + ' está repetido en la lista.', true); return; }
     try {
-      const r = await ocupado(btn, () => API.crearFolios(sel), 'Creando…');
-      if (r.creados.length) toast(r.creados.length + ' folio(s) creados como Recibido.');
-      if (r.repetidos.length) toast('Ya existían y no se tocaron: ' + r.repetidos.join(', '), true);
-      ventas().catch(fallo);
+      // Los avisos se muestran cuando la lista ya se recargó, para no borrar un archivo que se esté subiendo enseguida.
+      const avisos = [];
+      await ocupado(btn, async () => {
+        const nuevos = sel.filter((r) => !existente(r)), mods = sel.filter((r) => existente(r));
+        if (nuevos.length) {
+          const r = await API.crearFolios(nuevos);
+          if (r.creados.length) avisos.push([r.creados.length + ' folio(s) creados como Recibido.']);
+          if (r.repetidos.length) avisos.push(['Ya existían y no se tocaron: ' + r.repetidos.join(', '), true]);
+        }
+        for (const r of mods) {
+          const c = cambio(r);
+          if (c.dif.igual) { avisos.push([r.folio + ': el acopio no cambió.']); continue; }
+          const ok = await API.actualizarFolio(c.ex, r, c.dif.resumen);
+          avisos.push([ok ? r.folio + ' modificado (versión ' + ((Number(c.ex.version) || 1) + 1) + ').' : r.folio + ' ya está ' + ESTATUS[c.ex.estatus].nombre + ': no se modificó; quedó una alerta.', !ok]);
+        }
+      }, 'Guardando…');
+      await ventas().catch(fallo);
+      avisos.forEach(([m, mal]) => toast(m, mal));
     } catch (e) { err(e); }
   });
   pintar();
@@ -529,7 +566,7 @@ function panelDespacho(f, unidades, d, transportistas, cat) {
     h('div', { class: 'rejilla' },
       h('div', { class: 'todo' }, campo('Unidad', uSel)), h('div', { class: 'todo' }, avisoPeso),
       campo('Transportista', transportista), campo('Operador', operador), campo('Placas', placas),
-      campo('Fecha y hora de cita', cita), campo('Andén', anden),
+      h('div', null, campo('Fecha y hora de cita', cita), f.cita && f.estatus !== 'ENTREGADO' ? h('button', { type: 'button', class: 'enlace chico', onclick: () => dialogoReprogramar(f, () => transporte().catch(fallo)) }, 'Reprogramar (con motivo)') : null), campo('Andén', anden),
       h('div', null, campo(um ? 'Tarifa (MXN, opcional)' : 'Tarifa negociada (MXN)', tarifa, 'Solo la ven Transporte y Administrador.'),
         um ? h('label', { class: 'casilla' }, sinTarifa, ' No aplica tarifa') : null)),
     !um ? [sugerenciaTarifa(f, cat, tarifa), h('div', { class: 'rejilla' }, h('div', { class: 'todo' }, campo('Liga de rastreo del viaje (opcional)', ligaViaje))), h('h3', null, 'Cuenta espejo del transportista'), espejo] : null,
@@ -918,10 +955,79 @@ async function seccionUsuarios() {
           h('td', null, h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar a ' + u.id + '?')) { try { await API.borrarUsuario(u.id); recargar(); } catch (x) { err(x); } } } }, 'Borrar'))))))));
 }
 
+/* ================================================================== INCIDENCIAS Y REPROGRAMACIONES */
+const contenidoIncidencia = (x) => [h('span', { class: 'pill ' + (x.tipo === 'REPROGRAMACION' ? 'amarillo' : 'rojo') }, h('i'), x.tipo === 'REPROGRAMACION' ? 'Reprogramación' : x.categoria || 'Incidencia'),
+  ' ', h('b', null, x.motivo), x.tipo === 'REPROGRAMACION' && (x.cita_anterior || x.cita_nueva) ? ' · cita ' + (fecha(x.cita_anterior) || '—') + ' → ' + (fecha(x.cita_nueva) || '—') : '',
+  x.detalle ? ' — ' + x.detalle : '', h('br'), h('small', { class: 'gris' }, fecha(x.fecha) + ' · ' + (CFG.areas[x.area] ? CFG.areas[x.area].nombre : x.area) + (x.por ? ' (' + x.por + ')' : '') + (x.transportista ? ' · ' + x.transportista : ''))];
+const lineaIncidencia = (x) => h('li', null, contenidoIncidencia(x));
+function dialogoIncidencia(f, alTerminar) {
+  const cat = selector(Object.keys(INCIDENCIAS).map((k) => [k, k]), 'Material', { id: 'inc-categoria' });
+  const mot = selector([], '', { id: 'inc-motivo' });
+  const llenar = () => mount(mot, [h('option', { value: '' }, 'Elige…')].concat(INCIDENCIAS[cat.value].map((m) => h('option', { value: m }, m))));
+  cat.addEventListener('change', llenar); llenar();
+  const det = h('textarea', { class: 'entrada', id: 'inc-detalle', rows: 3, placeholder: 'Qué pasó (opcional)' });
+  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Registrar');
+  const dlg = modal('Incidencia · ' + f.folio, h('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    try { await ocupado(btn, () => API.registrarIncidencia(f, cat.value, mot.value, det.value.trim())); toast('Incidencia registrada en ' + f.folio + '.'); dlg.cerrar(); document.querySelectorAll('dialog.modal').forEach((d) => d.close()); if (alTerminar) alTerminar(); else irA(location.hash.slice(1)); } catch (x) { err(x); }
+  } }, h('div', { class: 'rejilla' }, campo('Tipo', cat), campo('Incidencia', mot), h('div', { class: 'todo' }, campo('Comentario', det))), h('div', { class: 'acciones' }, btn)));
+}
+function dialogoReprogramar(f, alTerminar) {
+  const mot = selector([['', 'Elige…']].concat(MOTIVOS_REPROGRAMACION.map((m) => [m, m])), '', { id: 'rep-motivo' });
+  const cita = entrada({ type: 'datetime-local', value: f.cita || '', id: 'rep-cita' });
+  const det = h('textarea', { class: 'entrada', id: 'rep-detalle', rows: 3, placeholder: 'Comentario (opcional)' });
+  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Reprogramar');
+  const dlg = modal('Reprogramar · ' + f.folio, h('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    try { await ocupado(btn, () => API.reprogramar(f, cita.value, mot.value, det.value.trim())); toast(f.folio + ' reprogramado.'); dlg.cerrar(); document.querySelectorAll('dialog.modal').forEach((d) => d.close()); if (alTerminar) alTerminar(); else irA(location.hash.slice(1)); } catch (x) { err(x); }
+  } }, h('p', { class: 'gris chico' }, 'Cita actual: ' + (f.cita ? fecha(f.cita) : 'sin cita')),
+  h('div', { class: 'rejilla' }, campo('Motivo', mot), campo('Nueva cita', cita), h('div', { class: 'todo' }, campo('Comentario', det))), h('div', { class: 'acciones' }, btn)));
+}
+async function incidencias() {
+  const [lista, folios, cfgTar] = await Promise.all([API.incidencias(), API.folios(), API.config('tarifas').catch(() => ({}))]);
+  const tarifas = cfgTar.lista || [];
+  const hoy = new Date(), mesActual = hoy.getFullYear() + '-' + String(hoy.getMonth() + 1).padStart(2, '0');
+  let mes = mesActual, tipo = 'todos', envio = 'todos';
+  const zona = h('div');
+  const meses = [...new Set(lista.map((x) => String(x.fecha).slice(0, 7)).concat(folios.map((f) => String(f.entregado || f.creado || '').slice(0, 7)), [mesActual]))].filter(Boolean).sort().reverse();
+  const conteo = (arr, fn) => { const m = new Map(); arr.forEach((x) => { const k = fn(x) || '—'; m.set(k, (m.get(k) || 0) + 1); }); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+  const tablaConteo = (titulo, filas) => h('div', { class: 'tarjeta mini' }, h('h3', null, titulo), filas.length ? h('table', { class: 'tabla compacta' }, h('tbody', null, filas.slice(0, 12).map(([k, n]) => h('tr', null, h('td', null, k), h('td', { class: 'num' }, h('b', null, String(n))))))) : h('p', { class: 'gris chico' }, 'Sin datos.'));
+  const diasDe = (f) => { const t = tarifaPara(tarifas, lugaresDe(f).map((l) => l.split(' · ').pop()).concat(String(f.destino || '').split(' / '))); return t ? t.dias : null; };
+  const pintar = () => {
+    const delMes = (x) => mes === 'todos' || String(x.fecha).startsWith(mes);
+    const vis = lista.filter((x) => delMes(x) && (tipo === 'todos' || x.tipo === tipo) && (envio === 'todos' || (x.tipo_envio || 'NACIONAL') === envio));
+    const entregados = folios.filter((f) => f.estatus === 'ENTREGADO' && (mes === 'todos' || String(f.entregado).startsWith(mes)) && (envio === 'todos' || (f.tipo_envio || 'NACIONAL') === envio));
+    const punt = entregados.map((f) => ({ f, p: puntualidad(f, diasDe(f)) }));
+    const aTiempo = punt.filter((x) => x.p === 'A tiempo').length, tarde = punt.filter((x) => x.p === 'Tarde').length, sinDato = punt.filter((x) => !x.p).length;
+    const pct = aTiempo + tarde ? Math.round((aTiempo / (aTiempo + tarde)) * 100) : null;
+    const reprog = vis.filter((x) => x.tipo === 'REPROGRAMACION'), incid = vis.filter((x) => x.tipo === 'INCIDENCIA');
+    mount(zona,
+      h('div', { class: 'contadores' },
+        h('div', { class: 'contador-c amarillo' }, h('b', null, String(reprog.length)), h('span', null, 'Reprogramaciones')),
+        h('div', { class: 'contador-c rojo' }, h('b', null, String(incid.length)), h('span', null, 'Incidencias')),
+        h('div', { class: 'contador-c verde' }, h('b', null, pct === null ? '—' : pct + '%'), h('span', null, 'Entregas a tiempo (' + aTiempo + ' de ' + (aTiempo + tarde) + ')')),
+        h('div', { class: 'contador-c rojo' }, h('b', null, String(tarde)), h('span', null, 'Entregas tarde')),
+        sinDato ? h('div', { class: 'contador-c gris' }, h('b', null, String(sinDato)), h('span', null, 'Entregados sin cita')) : null),
+      h('div', { class: 'resumenes' },
+        tablaConteo('Reprogramaciones por motivo', conteo(reprog, (x) => x.motivo)),
+        tablaConteo('Incidencias por tipo', conteo(incid, (x) => x.categoria + ' · ' + x.motivo)),
+        tablaConteo('Por transportista', conteo(vis, (x) => x.transportista || 'Sin asignar'))),
+      tarde ? h('section', { class: 'tarjeta' }, h('h2', null, 'Entregas tarde'), h('ul', { class: 'historial' }, punt.filter((x) => x.p === 'Tarde').map(({ f }) => h('li', null, h('b', null, f.folio), ' · ', f.cliente, ' · ', f.transportista || '—', ' · cita ' + (fecha(f.cita) || '—') + ' · entregado ' + fecha(f.entregado))))) : null,
+      h('section', { class: 'tarjeta' }, h('h2', null, 'Registro (' + vis.length + ')'),
+        vis.length ? h('ul', { class: 'historial' }, vis.map((x) => h('li', null, h('b', null, x.folio + ' '), envioChip(x), ' ', contenidoIncidencia(x)))) : h('p', { class: 'gris' }, 'Sin registros en este periodo.')));
+  };
+  const selMes = selector([['todos', 'Todo']].concat(meses.map((m) => [m, m])), mes, { 'aria-label': 'Mes', onchange: (e) => { mes = e.target.value; pintar(); } });
+  const selTipo = selector([['todos', 'Reprogramaciones e incidencias'], ['REPROGRAMACION', 'Solo reprogramaciones'], ['INCIDENCIA', 'Solo incidencias']], tipo, { 'aria-label': 'Tipo', onchange: (e) => { tipo = e.target.value; pintar(); } });
+  const selEnvio = selector([['todos', 'Nacional y Última Milla'], ['NACIONAL', 'Nacional'], ['ULTIMA_MILLA', 'Última Milla']], envio, { 'aria-label': 'Envío', onchange: (e) => { envio = e.target.value; pintar(); } });
+  mount(main, encabezado('Incidencias', 'Reprogramaciones, incidencias y entregas a tiempo. Se registran desde la ficha de cada folio.'),
+    h('div', { class: 'filtros' }, selMes, selTipo, selEnvio), zona);
+  pintar();
+}
+
 /* ================================================================== ALERTAS */
 async function alertas() {
   const lista = await API.alertas();
-  const TIPOS = { checklist: 'Checklist reprobado', sin_checklist: 'Salida sin checklist', capacidad: 'Sobrepeso', parado: 'Folio parado' };
+  const TIPOS = { checklist: 'Checklist reprobado', sin_checklist: 'Salida sin checklist', capacidad: 'Sobrepeso', parado: 'Folio parado', modificacion: 'Modificación de acopio' };
   mount(main, encabezado('Alertas', 'Avisos automáticos del sistema. El envío por correo está simulado: se registra aquí, todavía no se manda.'),
     h('section', { class: 'tarjeta' }, lista.length ? h('ul', { class: 'alertas' }, lista.map((a) => h('li', { class: a.leida ? 'leida' : '' },
       h('div', null, h('span', { class: 'pill ' + (a.leida ? 'gris' : 'rojo') }, h('i'), TIPOS[a.tipo] || a.tipo), ' ', h('b', null, a.texto)),

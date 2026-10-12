@@ -84,6 +84,21 @@ toneladas del folio** (con varias paradas, la del destino más caro). La tarifa 
    coordenadas de cada destino se capturan una vez y se reutilizan. Es una aproximación; no usa Samsara ni se manda a otro sistema.
 6. **Alertas:** checklist reprobado, salida sin checklist, sobrepeso y folio parado. El correo está **simulado**: se registra, no se envía.
 
+## Modificaciones de acopio
+
+Si Ventas vuelve a subir el acopio de un folio que ya existe (los «RE: … modificación»), el sistema lo compara con lo guardado y muestra
+qué partidas **se suben, se bajan, entran o salen** y la diferencia de kilos, tarimas y restos. Si el folio está Recibido, En preparación,
+Parado o Incompleto, se actualiza (versión 2, 3…) y queda en el historial; si ya tenía documentos, avisa a Operación para revisarlos.
+Si ya está Armado o más adelante, **no se cambia**: se registra una alerta.
+
+## Reprogramaciones e incidencias
+
+- **Incidencia** (cualquier área, desde la ficha del folio): tipo y motivo según el catálogo del Seguimiento (facturación, material,
+  documentos, embarque, transporte…) y comentario.
+- **Reprogramar** (Transporte y Administrador, desde la ficha o el despacho): motivo y nueva cita; queda la cita anterior y la nueva.
+- **Incidencias** (menú): por mes y tipo de envío, conteo por motivo y por transportista, y % de **entregas a tiempo** (entrega contra la
+  cita, o contra salida + días de tránsito del catálogo si no hubo cita).
+
 ## GPS de Samsara
 
 El token de Samsara no puede ir en esta página (es pública). `docs/samsara-puente/` trae una Cloud Function que guarda el token como
@@ -93,7 +108,7 @@ Mientras tanto, todo el Monitoreo funciona con datos simulados.
 
 ## Colecciones
 
-`lc_folios` (+ `historial`), `lc_pantalla`, `lc_despachos`, `lc_unidades`, `lc_destinos`, `lc_rutas`, `lc_alertas`, `lc_usuarios` (correo → área),
+`lc_folios` (+ `historial`), `lc_pantalla`, `lc_despachos`, `lc_unidades`, `lc_destinos`, `lc_rutas`, `lc_alertas`, `lc_incidencias`, `lc_usuarios` (correo → área),
 `lc_config` (`general` = origen, `gps` = puente, `transportistas` = transportistas externos y su cuenta espejo).
 
 ## Pruebas

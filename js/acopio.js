@@ -1,8 +1,8 @@
 /* Formato de Acopio (.xlsx / .xlsm): lee las hojas Base, CB360 y Exhibición sin librerías, separa por cliente y destino,
    y calcula tarimas, resto de tarima y peso. Los títulos de columna se buscan por nombre (no por posición), así que el
    formato puede mover columnas. Todo lo calculado se muestra antes de crear los folios para corregirlo a mano. */
-import { combinarFolios, tarimas, tipoUnidad, redondeo, norm, coordenadasDeLiga } from './reglas.js?v=15';
-import { embalajeDe } from './embalajes.js?v=15';
+import { combinarFolios, tarimas, tipoUnidad, redondeo, norm, coordenadasDeLiga } from './reglas.js?v=17';
+import { embalajeDe } from './embalajes.js?v=17';
 
 export const HOJAS = [['BASE', 'Base'], ['CB360', 'CB360'], ['EXHIBICION', 'Exhibición']];
 
@@ -342,9 +342,41 @@ export function interpretar(hojas) {
     const t = tarimas(g.tarimas), peso = redondeo(g.peso_kg, 0);
     return {
       folio: combinarFolios(g.folios), cliente: g.cliente, destino: g.destino, hojas: Object.keys(g.hojas),
-      tarimas: t.total, tarimas_completas: t.completas, resto: t.resto, peso_kg: peso, tipo_unidad: tipoUnidad(peso), renglones: g.renglones
+      // Otros formatos no traen cajas por tarima: las tarimas quedan con decimales y los restos (cajas) en 0.
+      tarimas: t.total, tarimas_completas: t.completas, resto: 0, peso_kg: peso, tipo_unidad: tipoUnidad(peso), renglones: g.renglones
     };
   });
   if (!grupos.length && !avisos.length) avisos.push('No se encontró ningún pedido en el archivo.');
   return { grupos, avisos };
+}
+
+/* ---------------------------------------------------------------- Modificaciones
+   Compara el folio guardado con el acopio nuevo: partidas nuevas, quitadas y con otra cantidad («se sube», «se baja»),
+   y la diferencia de kilos, tarimas y restos. Una partida es el mismo producto (SKU), lote y destino de envío. */
+export function compararFolio(antes, despues) {
+  const llave = (m) => [m.destino, m.sku || m.producto, m.lote].join('|');
+  const suma = (lista) => { const r = new Map(); (lista || []).forEach((m) => { const k = llave(m); const ya = r.get(k); if (ya) ya.cantidad += Number(m.cantidad) || 0; else r.set(k, Object.assign({}, m, { cantidad: Number(m.cantidad) || 0 })); }); return r; };
+  const a = suma(antes.material), d = suma(despues.material), lineas = [];
+  d.forEach((m, k) => {
+    const x = a.get(k);
+    if (!x) lineas.push({ tipo: 'nueva', producto: m.producto, sku: m.sku, um: m.um, antes: 0, despues: m.cantidad });
+    else if (x.cantidad !== m.cantidad) lineas.push({ tipo: m.cantidad > x.cantidad ? 'sube' : 'baja', producto: m.producto, sku: m.sku, um: m.um, antes: x.cantidad, despues: m.cantidad });
+  });
+  a.forEach((m, k) => { if (!d.has(k)) lineas.push({ tipo: 'quitada', producto: m.producto, sku: m.sku, um: m.um, antes: m.cantidad, despues: 0 }); });
+  const kg = [Number(antes.peso_kg) || 0, Number(despues.peso_kg) || 0], tar = [Number(antes.tarimas) || 0, Number(despues.tarimas) || 0], res = [Number(antes.resto) || 0, Number(despues.resto) || 0];
+  const otros = [];
+  if (String(antes.destino || '') !== String(despues.destino || '')) otros.push('destino: ' + (antes.destino || '—') + ' → ' + (despues.destino || '—'));
+  if (String(antes.cliente || '') !== String(despues.cliente || '')) otros.push('cliente: ' + (antes.cliente || '—') + ' → ' + (despues.cliente || '—'));
+  const igual = !lineas.length && Math.abs(kg[0] - kg[1]) < 0.5 && tar[0] === tar[1] && res[0] === res[1] && !otros.length;
+  const signo = (n, u) => (n > 0 ? '+' : '') + (Math.round(n * 100) / 100).toLocaleString('es-MX') + u;
+  const partes = [];
+  const n = (t) => lineas.filter((l) => l.tipo === t).length;
+  if (n('sube')) partes.push(n('sube') + ' se sube');
+  if (n('baja')) partes.push(n('baja') + ' se baja');
+  if (n('nueva')) partes.push(n('nueva') + ' nueva(s)');
+  if (n('quitada')) partes.push(n('quitada') + ' quitada(s)');
+  if (Math.abs(kg[1] - kg[0]) >= 0.5) partes.push(signo(kg[1] - kg[0], ' kg') + ' (' + kg[0].toLocaleString('es-MX') + ' → ' + kg[1].toLocaleString('es-MX') + ' kg)');
+  if (tar[0] !== tar[1]) partes.push('tarimas ' + tar[0] + ' → ' + tar[1]);
+  if (res[0] !== res[1]) partes.push('restos ' + res[0] + ' → ' + res[1] + ' cj');
+  return { igual, lineas, kg, tarimas: tar, restos: res, otros, resumen: igual ? 'sin cambios' : partes.concat(otros).join(' · ') + (lineas.length ? ' · ' + lineas.slice(0, 8).map((l) => l.producto.slice(0, 40) + ' ' + l.antes + '→' + l.despues).join('; ') : '') };
 }

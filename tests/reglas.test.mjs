@@ -2,10 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { combinarFolios, tipoUnidad, tarimas, idFolio, docsCompletos, revisarChecklist, excedeCapacidad, coordenadasDeLiga, esLigaCorta } from '../js/reglas.js';
+import { combinarFolios, tipoUnidad, tarimas, idFolio, docsCompletos, revisarChecklist, excedeCapacidad, coordenadasDeLiga, esLigaCorta, puntualidad } from '../js/reglas.js';
 import { revisarPartida, EMBALAJES } from '../js/embalajes.js';
 import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara, unirTransportista } from '../js/catalogos.js';
-import { leerLibro, interpretar, combinar } from '../js/acopio.js';
+import { leerLibro, interpretar, combinar, compararFolio } from '../js/acopio.js';
 import { planear, km } from '../js/ruta.js';
 import { simulada } from '../js/gps.js';
 
@@ -55,11 +55,11 @@ test('Formato de Acopio: hojas Base, CB360 y Exhibición', { skip: !existsSync(n
   assert.equal(por['Interceramic Norte'].tipo_unidad, 'FULL');
   assert.deepEqual(por['Interceramic Norte'].hojas, ['Base', 'CB360']);
   assert.equal(por['Distribuidora Bajío'].folio, '30010/30011');
-  assert.equal(por['Distribuidora Bajío'].resto, 0.5);
+  assert.equal(por['Distribuidora Bajío'].tarimas, 3.5);
   // Exhibición en toneladas → kg
   assert.equal(por['Showroom Polanco'].peso_kg, 800);
   assert.equal(por['Showroom Polanco'].destino, 'CDMX');
-  assert.equal(por['Showroom Polanco'].resto, 0.25);
+  assert.equal(por['Showroom Polanco'].resto, 0);
 });
 test('ruta más corta (línea recta)', () => {
   const o = { lat: 0, lng: 0 };
@@ -199,4 +199,20 @@ test('Restos: 21 cajas con 20 por tarima = 1 tarima + 1 resto', () => {
   assert.equal(g.tarimas, 2); assert.equal(g.resto, 10);
   assert.deepEqual([g.paradas[0].restos_liso, g.paradas[0].restos_deco], [3, 7]);
   assert.ok(avisos.some((a) => /se calcularon con las cajas por tarima/.test(a)));
+});
+test('Modificación de acopio: qué se sube, se baja, entra y sale', () => {
+  const a = { peso_kg: 1000, tarimas: 2, resto: 1, destino: 'LEON', material: [{ destino: '1', sku: 'A', lote: 'x', producto: 'PISO A', cantidad: 40, um: 'CJ' }, { destino: '1', sku: 'B', lote: 'y', producto: 'PISO B', cantidad: 10, um: 'CJ' }] };
+  const d = { peso_kg: 1300, tarimas: 3, resto: 1, destino: 'LEON', material: [{ destino: '1', sku: 'A', lote: 'x', producto: 'PISO A', cantidad: 60, um: 'CJ' }, { destino: '1', sku: 'C', lote: 'z', producto: 'PISO C', cantidad: 5, um: 'CJ' }] };
+  const r = compararFolio(a, d);
+  assert.equal(r.igual, false);
+  assert.deepEqual(r.lineas.map((l) => [l.tipo, l.sku, l.antes, l.despues]), [['sube', 'A', 40, 60], ['nueva', 'C', 0, 5], ['quitada', 'B', 10, 0]]);
+  assert.match(r.resumen, /\+300 kg/);
+  assert.equal(compararFolio(a, a).igual, true);
+});
+test('Entrega a tiempo o tarde', () => {
+  assert.equal(puntualidad({ estatus: 'ENTREGADO', cita: '2026-10-13T09:30', entregado: '2026-10-13T18:00:00' }), 'A tiempo');
+  assert.equal(puntualidad({ estatus: 'ENTREGADO', cita: '2026-10-13T09:30', entregado: '2026-10-14T08:00:00' }), 'Tarde');
+  assert.equal(puntualidad({ estatus: 'ENTREGADO', salida: '2026-10-10T08:00:00', entregado: '2026-10-12T10:00:00' }, 3), 'A tiempo');
+  assert.equal(puntualidad({ estatus: 'ENTREGADO', entregado: '2026-10-12T10:00:00' }), null);
+  assert.equal(puntualidad({ estatus: 'EN_RUTA', cita: '2026-10-13' }), null);
 });

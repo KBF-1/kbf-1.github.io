@@ -60,7 +60,8 @@ test('Alta de folios: Ventas sí, Operación no; siempre como RECIBIDO', async (
   await assertFails(setDoc(doc(como('ventas'), 'lc_folios', 'F4'), folio({ folio: '400', estatus: 'LISTO', docs: { factura: true, carta_porte: true, remision: true } })));
   await assertFails(setDoc(doc(como('ventas'), 'lc_folios', 'F5'), folio({ folio: '500', tarifa: 1 })));
   await assertSucceeds(setDoc(doc(como('ventas'), 'lc_folios', 'F6'), folio({ folio: '600', clasificacion: 'C', paradas: [{ codigo: '1', sucursal: 'S', ciudad: 'León', tarimas: 2, restos_liso: 0, restos_deco: 0, peso_kg: 1000, m2: 0 }] })));
-  await assertFails(updateDoc(doc(como('ventas'), 'lc_folios', 'F2'), { cliente: 'Otro' }));
+  await assertSucceeds(updateDoc(doc(como('ventas'), 'lc_folios', 'F2'), { cliente: 'Otro' })); // modificación de acopio (antes de Armado)
+  await assertFails(updateDoc(doc(como('ventas'), 'lc_folios', 'F2'), { estatus: 'ARMADO' }));
 });
 test('LISTO PARA TRANSPORTE se bloquea en el servidor si falta un documento', async () => {
   const op = como('operacion');
@@ -126,6 +127,30 @@ test('Borrar folio: solo Administrador (con historial)', async () => {
   await assertFails(deleteDoc(doc(como('transporte'), 'lc_folios', 'B1', 'historial', 'h')));
   await assertSucceeds(deleteDoc(doc(como('admin'), 'lc_folios', 'B1', 'historial', 'h')));
   await assertSucceeds(deleteDoc(doc(como('admin'), 'lc_folios', 'B1')));
+});
+test('Modificación de acopio: Ventas cambia el contenido solo antes de Armado', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    await setDoc(doc(c.firestore(), 'lc_folios', 'M1'), folio({ folio: 'M1' }));
+    await setDoc(doc(c.firestore(), 'lc_folios', 'M2'), folio({ folio: 'M2', estatus: 'ARMADO' }));
+  });
+  const v = como('ventas');
+  await assertSucceeds(updateDoc(doc(v, 'lc_folios', 'M1'), { peso_kg: 2000, tarimas: 4, material: [], version: 2, modificado: 'x', actualizado: 'x' }));
+  await assertFails(updateDoc(doc(v, 'lc_folios', 'M1'), { estatus: 'ARMADO' }));
+  await assertFails(updateDoc(doc(v, 'lc_folios', 'M1'), { 'docs.factura': true }));
+  await assertFails(updateDoc(doc(v, 'lc_folios', 'M1'), { transportista: 'X' }));
+  await assertFails(updateDoc(doc(v, 'lc_folios', 'M2'), { peso_kg: 2000 }));
+});
+test('Reprogramaciones e incidencias', async () => {
+  const inc = (area, extra) => ({ folio_id: 'F1', folio: '100', tipo: 'INCIDENCIA', categoria: 'Material', motivo: 'Inexistencia', area, por: CORREO[area], fecha: 'x', ...extra });
+  await assertSucceeds(setDoc(doc(como('operacion'), 'lc_incidencias', 'I1'), inc('operacion')));
+  await assertSucceeds(setDoc(doc(como('ventas'), 'lc_incidencias', 'I2'), inc('ventas')));
+  await assertFails(setDoc(doc(como('ventas'), 'lc_incidencias', 'I3'), inc('ventas', { tipo: 'REPROGRAMACION', motivo: 'Clima' })));
+  await assertSucceeds(setDoc(doc(como('transporte'), 'lc_incidencias', 'I4'), inc('transporte', { tipo: 'REPROGRAMACION', motivo: 'Clima' })));
+  await assertFails(setDoc(doc(como('operacion'), 'lc_incidencias', 'I5'), inc('operacion', { motivo: '' })));
+  await assertFails(setDoc(doc(como('operacion'), 'lc_incidencias', 'I6'), inc('operacion', { por: CORREO.ventas })));
+  await assertFails(getDocs(collection(env.unauthenticatedContext().firestore(), 'lc_incidencias')));
+  await assertFails(deleteDoc(doc(como('transporte'), 'lc_incidencias', 'I1')));
+  await assertSucceeds(deleteDoc(doc(como('admin'), 'lc_incidencias', 'I1')));
 });
 test('La sesión vence a las 12 horas', async () => {
   await assertSucceeds(getDoc(doc(como('transporte', 11.9), 'lc_despachos', 'F1')));

@@ -143,6 +143,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tabla.material td { vertical-align: top; }
 .tabla tr.alerta td { background: var(--rojo-bg); }
 .entrada.unir { width: auto; min-height: 32px; padding: 4px 8px; font-size: 13px; margin-top: 4px; }
+.modificacion { border-radius: 8px; padding: 10px 12px; margin: 6px 0 8px; border: 1px solid var(--linea); }
+.modificacion.aplica { background: var(--amarillo-bg); }
+.modificacion.no-aplica { background: var(--rojo-bg); color: var(--rojo); }
+.modificacion.igual { background: var(--gris-bg); }
+.modificacion p { margin: 4px 0; }
+.cambios { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+.cambios .sube b, .cambios .nueva b { color: var(--verde); } .cambios .baja b, .cambios .quitada b { color: var(--rojo); }
+.resumenes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tarjeta.mini { padding: 14px; margin: 0; }
+.contador-c.gris { color: var(--gris); }
 .sugerencia { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--azul-bg); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
 .cliente-cat { background: #FBF9F6; border: 1px solid var(--linea); border-radius: 8px; padding: 12px; margin: 10px 0; }
 .espejo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }

@@ -1,7 +1,7 @@
 /* Acceso a Firebase (colecciones lc_). Las reglas de Firestore repiten cada permiso en el servidor:
    ocultar un botón aquí no es lo que protege los datos. */
-import * as fb from './firebase-sdk.js?v=15';
-import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=15';
+import * as fb from './firebase-sdk.js?v=17';
+import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=17';
 
 const CFG = window.LC_CONFIG;
 const params = new URLSearchParams(location.search);
@@ -107,7 +107,8 @@ export async function folio(id) { const s = await fb.getDoc(D('lc_folios', id));
 /* Borra el folio con todo lo suyo: historial, despacho (tarifa, checklist) y su renglón en la Pantalla. Solo Administrador. */
 export async function borrarFolio(f) {
   const hist = await fb.getDocs(fb.collection(db, 'lc_folios', f.id, 'historial'));
-  const docs = hist.docs.map((d) => d.ref).concat([D('lc_despachos', f.id), D('lc_pantalla', f.id), D('lc_folios', f.id)]);
+  const inc = await fb.getDocs(fb.query(C('lc_incidencias'), fb.where('folio_id', '==', f.id)));
+  const docs = hist.docs.map((d) => d.ref).concat(inc.docs.map((d) => d.ref), [D('lc_despachos', f.id), D('lc_pantalla', f.id), D('lc_folios', f.id)]);
   for (let i = 0; i < docs.length; i += 450) {
     const b = fb.writeBatch(db);
     docs.slice(i, i + 450).forEach((r) => b.delete(r));
@@ -134,36 +135,43 @@ export function publico(f) {
 const espejo = (b, f, cambios) => b.set(D('lc_pantalla', f.id), publico(Object.assign({}, f, cambios)));
 const txt = (v, n) => String(v === undefined || v === null ? '' : v).slice(0, n || 200);
 
-/* Alta de folios (Ventas). Si el folio ya existe no se toca. Los de Última Milla usan el id UM-<folio> para no chocar con Nacional. */
+/* Id del folio en Firestore: los de Última Milla usan UM-<folio> para no chocar con Nacional. */
+export const idDe = (g) => (idFolio(g.folio) ? (g.tipo_envio === 'ULTIMA_MILLA' ? 'UM-' : '') + idFolio(g.folio) : '');
+/* Contenido del acopio / cuadro (lo que puede cambiar con una modificación). */
+function contenido(g) {
+  const um = g.tipo_envio === 'ULTIMA_MILLA', e = g.entrega || {};
+  return {
+    tipo_envio: um ? 'ULTIMA_MILLA' : 'NACIONAL', m2: Number(g.m2) || 0,
+    lat: typeof g.lat === 'number' ? g.lat : null, lng: typeof g.lng === 'number' ? g.lng : null,
+    entrega: um ? { recibe: txt(e.recibe), telefono: txt(e.telefono, 40), telefono2: txt(e.telefono2, 40), calle: txt(e.calle), no_ext: txt(e.no_ext, 20),
+      no_int: txt(e.no_int, 20), colonia: txt(e.colonia), cp: txt(e.cp, 10), localidad: txt(e.localidad), municipio: txt(e.municipio), maps: txt(e.maps, 500),
+      observaciones: txt(e.observaciones, 1000), descarga: txt(e.descarga, 20), embarque: txt(e.embarque, 30), orden: txt(e.orden, 30), factura: txt(e.factura, 30),
+      flete_directo: !!e.flete_directo, gran_formato: !!e.gran_formato, adhesivos: !!e.adhesivos, almacen_distinto: !!e.almacen_distinto } : null,
+    material: (g.material || []).slice(0, 300).map((m) => ({ destino: txt(m.destino, 30), orden: txt(m.orden, 30), sku: txt(m.sku, 40), producto: txt(m.producto),
+      formato: txt(m.formato, 60), cantidad: Number(m.cantidad) || 0, um: txt(m.um, 10), cajas_tarima: Number(m.cajas_tarima) || 0, tarimas: Number(m.tarimas) || 0, restos: Number(m.restos) || 0,
+      kg: Number(m.kg) || 0, m2: Number(m.m2) || 0, lote: txt(m.lote, 30), oc: txt(m.oc, 60) })),
+    cliente: g.cliente, destino: g.destino, hojas: g.hojas || [],
+    tarimas: Number(g.tarimas) || 0, resto: Number(g.resto) || 0, peso_kg: Number(g.peso_kg) || 0, tipo_unidad: g.tipo_unidad,
+    clasificacion: String(g.clasificacion || ''), paradas: (g.paradas || []).slice(0, 40).map((p) => ({
+      codigo: String(p.codigo || ''), venta: String(p.venta || ''), sucursal: String(p.sucursal || ''), ciudad: String(p.ciudad || ''), tarimas: Number(p.tarimas) || 0,
+      restos_liso: Number(p.restos_liso) || 0, restos_deco: Number(p.restos_deco) || 0, peso_kg: Number(p.peso_kg) || 0, m2: Number(p.m2) || 0 }))
+  };
+}
+
+/* Alta de folios (Ventas). Si el folio ya existe no se toca (para cambiarlo está actualizarFolio). */
 export async function crearFolios(grupos) {
   const creados = [], repetidos = [];
   for (const g of grupos) {
-    const um = g.tipo_envio === 'ULTIMA_MILLA';
-    const id = idFolio(g.folio) ? (um ? 'UM-' : '') + idFolio(g.folio) : '';
+    const id = idDe(g);
     if (!id) throw new Error('Hay un pedido sin folio (' + g.cliente + ').');
     const ok = await fb.runTransaction(db, async (tx) => {
       const ref = D('lc_folios', id);
       if ((await tx.get(ref)).exists()) return false;
-      const e = g.entrega || {};
-      const datos = {
-        tipo_envio: um ? 'ULTIMA_MILLA' : 'NACIONAL', m2: Number(g.m2) || 0,
-        lat: typeof g.lat === 'number' ? g.lat : null, lng: typeof g.lng === 'number' ? g.lng : null,
-        entrega: um ? { recibe: txt(e.recibe), telefono: txt(e.telefono, 40), telefono2: txt(e.telefono2, 40), calle: txt(e.calle), no_ext: txt(e.no_ext, 20),
-          no_int: txt(e.no_int, 20), colonia: txt(e.colonia), cp: txt(e.cp, 10), localidad: txt(e.localidad), municipio: txt(e.municipio), maps: txt(e.maps, 500),
-          observaciones: txt(e.observaciones, 1000), descarga: txt(e.descarga, 20), embarque: txt(e.embarque, 30), orden: txt(e.orden, 30), factura: txt(e.factura, 30),
-          flete_directo: !!e.flete_directo, gran_formato: !!e.gran_formato, adhesivos: !!e.adhesivos, almacen_distinto: !!e.almacen_distinto } : null,
-        material: (g.material || []).slice(0, 300).map((m) => ({ destino: txt(m.destino, 30), orden: txt(m.orden, 30), sku: txt(m.sku, 40), producto: txt(m.producto),
-          formato: txt(m.formato, 60), cantidad: Number(m.cantidad) || 0, um: txt(m.um, 10), cajas_tarima: Number(m.cajas_tarima) || 0, tarimas: Number(m.tarimas) || 0, restos: Number(m.restos) || 0,
-          kg: Number(m.kg) || 0, m2: Number(m.m2) || 0, lote: txt(m.lote, 30), oc: txt(m.oc, 60) })),
-        folio: g.folio, cliente: g.cliente, destino: g.destino, hojas: g.hojas || [],
-        tarimas: Number(g.tarimas) || 0, resto: Number(g.resto) || 0, peso_kg: Number(g.peso_kg) || 0, tipo_unidad: g.tipo_unidad,
-        clasificacion: String(g.clasificacion || ''), paradas: (g.paradas || []).slice(0, 40).map((p) => ({
-          codigo: String(p.codigo || ''), venta: String(p.venta || ''), sucursal: String(p.sucursal || ''), ciudad: String(p.ciudad || ''), tarimas: Number(p.tarimas) || 0,
-          restos_liso: Number(p.restos_liso) || 0, restos_deco: Number(p.restos_deco) || 0, peso_kg: Number(p.peso_kg) || 0, m2: Number(p.m2) || 0 })),
-        estatus: 'RECIBIDO', motivo: '', docs: { factura: false, carta_porte: false, remision: false },
+      const datos = Object.assign(contenido(g), {
+        folio: g.folio, estatus: 'RECIBIDO', motivo: '', docs: { factura: false, carta_porte: false, remision: false },
         transportista: '', unidad: '', cita: '', anden: '', salida: '', entregado: '',
-        creado: ahora(), actualizado: ahora(), creado_por: sesion.area
-      };
+        creado: ahora(), actualizado: ahora(), creado_por: sesion.area, version: 1
+      });
       tx.set(ref, datos);
       tx.set(D('lc_pantalla', id), publico(Object.assign({ id }, datos)));
       tx.set(fb.doc(fb.collection(db, 'lc_folios', id, 'historial')), { fecha: ahora(), area: sesion.area, por: sesion.correo, texto: 'Alta del folio (Recibido)' });
@@ -172,6 +180,28 @@ export async function crearFolios(grupos) {
     (ok ? creados : repetidos).push(g.folio);
   }
   return { creados, repetidos };
+}
+
+/* Estatus en los que todavía se acepta una modificación del acopio (antes de armar). */
+export const MODIFICABLE = ['RECIBIDO', 'EN_PREPARACION', 'PARADO', 'INCOMPLETO'];
+/* Modificación de acopio: reemplaza el contenido del folio, sube la versión y deja en el historial qué cambió.
+   Si ya está Armado o más adelante no se toca: solo se registra una alerta. resumen = texto del cambio. */
+export async function actualizarFolio(f, g, resumen) {
+  const b = fb.writeBatch(db);
+  if (!MODIFICABLE.includes(f.estatus)) {
+    alertaEn(b, 'modificacion', f, 'Llegó una modificación del acopio del folio ' + f.folio + ' pero ya está ' + f.estatus.replace('_', ' ') + ': no se aplicó. ' + resumen);
+    bitacora(b, f.id, 'Modificación NO aplicada (folio ' + f.estatus.replace('_', ' ') + '): ' + resumen);
+    await b.commit();
+    return false;
+  }
+  const cambios = Object.assign(contenido(g), { actualizado: ahora(), modificado: ahora(), version: (Number(f.version) || 1) + 1 });
+  b.update(D('lc_folios', f.id), cambios);
+  espejo(b, f, cambios);
+  bitacora(b, f.id, 'Modificación de acopio (versión ' + cambios.version + '): ' + resumen);
+  // Si ya se habían entregado documentos, hay que revisarlos contra el material nuevo.
+  if (Object.values(f.docs || {}).some(Boolean)) alertaEn(b, 'modificacion', f, 'El acopio del folio ' + f.folio + ' cambió: revisa factura, carta porte y remisión. ' + resumen);
+  await b.commit();
+  return true;
 }
 
 /* Operación: estatus, motivo y documentos. LISTO exige los tres documentos (también lo exige el servidor). */
@@ -240,6 +270,31 @@ export async function guardarUbicacion(f, pos, liga) {
   const cambios = { lat: pos.lat, lng: pos.lng, actualizado: ahora() };
   if (liga && f.entrega) cambios['entrega.maps'] = txt(liga, 500);
   await fb.updateDoc(D('lc_folios', f.id), cambios);
+}
+
+/* ------------------------------------------------------------------ reprogramaciones e incidencias (lc_incidencias) */
+export async function incidencias() { return lista(await fb.getDocs(C('lc_incidencias'))).sort((a, b) => (a.fecha < b.fecha ? 1 : -1)); }
+export async function incidenciasDe(f) { return lista(await fb.getDocs(fb.query(C('lc_incidencias'), fb.where('folio_id', '==', f.id)))).sort((a, b) => (a.fecha < b.fecha ? 1 : -1)); }
+function registro(b, f, datos) {
+  b.set(fb.doc(C('lc_incidencias')), Object.assign({ folio_id: f.id, folio: f.folio, tipo_envio: f.tipo_envio || 'NACIONAL', cliente: f.cliente || '',
+    transportista: f.transportista || '', estatus: f.estatus, fecha: ahora(), area: sesion.area, por: sesion.correo }, datos));
+}
+/* Reprogramar (Transporte / Administrador): nueva cita, motivo y comentario. */
+export async function reprogramar(f, citaNueva, motivo, detalle) {
+  if (!motivo) throw new Error('Elige el motivo de la reprogramación.');
+  const b = fb.writeBatch(db);
+  registro(b, f, { tipo: 'REPROGRAMACION', motivo, detalle: txt(detalle, 500), cita_anterior: f.cita || '', cita_nueva: citaNueva || '' });
+  if (citaNueva !== undefined && citaNueva !== f.cita) { b.update(D('lc_folios', f.id), { cita: citaNueva || '', actualizado: ahora() }); espejo(b, f, { cita: citaNueva || '' }); }
+  bitacora(b, f.id, 'Reprogramado: ' + motivo + (citaNueva ? ' · nueva cita ' + citaNueva.replace('T', ' ') : '') + (detalle ? ' — ' + detalle : ''));
+  await b.commit();
+}
+/* Incidencia (cualquier área): categoría, motivo y comentario. */
+export async function registrarIncidencia(f, categoria, motivo, detalle) {
+  if (!motivo) throw new Error('Elige la incidencia.');
+  const b = fb.writeBatch(db);
+  registro(b, f, { tipo: 'INCIDENCIA', categoria, motivo, detalle: txt(detalle, 500) });
+  bitacora(b, f.id, 'Incidencia: ' + categoria + ' · ' + motivo + (detalle ? ' — ' + detalle : ''));
+  await b.commit();
 }
 
 /* Catálogos (Transporte y Administrador). */
