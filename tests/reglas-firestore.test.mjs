@@ -43,6 +43,7 @@ test('Alta de folios: Ventas sí, Operación no; siempre como RECIBIDO', async (
   await assertFails(setDoc(doc(como('operacion'), 'lc_folios', 'F3'), folio({ folio: '300' })));
   await assertFails(setDoc(doc(como('ventas'), 'lc_folios', 'F4'), folio({ folio: '400', estatus: 'LISTO', docs: { factura: true, carta_porte: true, remision: true } })));
   await assertFails(setDoc(doc(como('ventas'), 'lc_folios', 'F5'), folio({ folio: '500', tarifa: 1 })));
+  await assertSucceeds(setDoc(doc(como('ventas'), 'lc_folios', 'F6'), folio({ folio: '600', clasificacion: 'C', paradas: [{ codigo: '1', sucursal: 'S', ciudad: 'León', tarimas: 2, restos_liso: 0, restos_deco: 0, peso_kg: 1000, m2: 0 }] })));
   await assertFails(updateDoc(doc(como('ventas'), 'lc_folios', 'F2'), { cliente: 'Otro' }));
 });
 test('LISTO PARA TRANSPORTE se bloquea en el servidor si falta un documento', async () => {

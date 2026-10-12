@@ -36,7 +36,7 @@ no solo la página).
 
 ## Flujo de un folio
 
-1. **Ventas** sube el Formato de Acopio (.xlsx/.xlsm). Se leen las hojas Base, CB360 y Exhibición; las columnas se reconocen por su
+1. **Ventas** sube uno o varios Formatos de Acopio (macro de CESANTONI). Cada archivo es un folio (celda «Folio:» de Base) con su clasificación y sus destinos de envío (sucursal, ciudad, tarimas, restos en cajas, kilos); CB360 y Exhibición suman su peso. Folios que van en la misma unidad se juntan con «Juntar marcados». Otros formatos: las columnas se reconocen por su
    título (Pedido/Folio, Cliente, Destino/Ciudad, Tarimas, o Cajas y Cajas por tarima, Peso en kg o toneladas). Se separa por cliente y
    destino, se calculan tarimas, resto de tarima y peso, y se muestra todo para revisarlo antes de crear los folios como **Recibido**.
    Reglas fijas: folios combinados con «/» (nunca «Y») y sin letra pegada; SENCILLO hasta 40 t, FULL arriba de 40 t.

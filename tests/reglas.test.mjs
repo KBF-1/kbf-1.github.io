@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { combinarFolios, tipoUnidad, tarimas, idFolio, docsCompletos, revisarChecklist, excedeCapacidad } from '../js/reglas.js';
-import { leerLibro, interpretar } from '../js/acopio.js';
+import { leerLibro, interpretar, combinar } from '../js/acopio.js';
 import { planear, km } from '../js/ruta.js';
 import { simulada } from '../js/gps.js';
 
@@ -79,4 +79,30 @@ test('GPS simulado avanza y llega', () => {
   const b = simulada(o, d, salida, Date.parse('2026-10-12T20:00:00Z'));
   assert.equal(b.lat, 21); assert.equal(b.velocidad, 0);
   assert.equal(simulada(o, null, salida).lat, 20);
+});
+test('Formato de Acopio CESANTONI: un folio por archivo, por destino de envío', async () => {
+  const leer = async (n) => interpretar(await leerLibro(new Uint8Array(readFileSync(new URL(n, import.meta.url)))));
+  const { grupos, avisos } = await leer('./acopio-cesantoni.xlsm');
+  assert.deepEqual(avisos, []);
+  assert.equal(grupos.length, 1);
+  const g = grupos[0];
+  assert.equal(g.folio, '7777A');
+  assert.equal(g.clasificacion, 'C');
+  assert.equal(g.cliente, 'CLIENTE PRUEBA SA DE CV');
+  assert.equal(g.destino, 'LEON / QUERETARO');
+  assert.deepEqual(g.paradas.map((p) => [p.codigo, p.sucursal, p.tarimas, p.restos_liso, p.restos_deco, p.peso_kg]),
+    [['9001', 'PRUEBA Suc. LEON', 13, 3, 2, 26000], ['9002', 'PRUEBA Suc. QRO', 8, 0, 0, 15000]]);
+  // Base (41 t) + Exhibición (500 kg, 1 espacio) → 41.5 t, FULL
+  assert.equal(g.peso_kg, 41500);
+  assert.equal(g.tarimas, 22);
+  assert.equal(g.resto, 5);
+  assert.equal(g.tipo_unidad, 'FULL');
+  assert.deepEqual(g.hojas, ['Base', 'Exhibición']);
+  // Dos acopios en la misma unidad
+  const g2 = (await leer('./acopio-cesantoni-2.xlsm')).grupos[0];
+  const c = combinar([g, g2]);
+  assert.equal(c.folio, '7777/8888');
+  assert.equal(c.peso_kg, 83000);
+  assert.equal(c.paradas.length, 2);
+  assert.equal(c.paradas[0].tarimas, 26);
 });

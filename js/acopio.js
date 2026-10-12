@@ -135,8 +135,118 @@ function renglonesDe(filas, hoja) {
   return { renglones, aviso: renglones.length ? '' : 'La hoja ' + hoja + ' no tiene renglones con cantidades.' };
 }
 
-/* Libro → { grupos: [...], avisos: [...] }. Un grupo = un cliente + destino (un folio, o varios combinados con «/»). */
+/* ---------------------------------------------------------------- Formato de Acopio CESANTONI (macro «Nueva Development»)
+   Un archivo = un folio (celda junto a «Folio:» en Base o logistica). La hoja Base trae un renglón por partida con
+   «Destino envío», «Nom Sucursal», «Destino» (ciudad), «Cliente», «Kg.», «Tarimas» y «Restos tarima - liso / deco» (cajas sueltas).
+   CB360 y Exhibición suman su «Peso (kgs)»; los «Espacios» de Exhibición cuentan como tarimas. */
+const hojaPor = (hojas, clave) => {
+  const n = Object.keys(hojas);
+  return n.find((x) => norm(x).replace(/\s/g, '') === clave) || null;
+};
+function valorJunto(filas, etiqueta, maxFilas, abajoPrimero) {
+  for (let i = 0; i < Math.min(filas.length, maxFilas || 8); i++) {
+    const f = filas[i] || [];
+    for (let c = 0; c < f.length; c++) {
+      if (norm(f[c]).replace(/:$/, '') !== etiqueta) continue;
+      if (abajoPrimero && texto((filas[i + 1] || [])[c])) return texto(filas[i + 1][c]);
+      for (let d = c + 1; d < f.length; d++) if (texto(f[d])) return texto(f[d]);
+      const abajo = (filas[i + 1] || [])[c]; // a veces el valor queda en la fila de abajo
+      if (texto(abajo)) return texto(abajo);
+    }
+  }
+  return '';
+}
+function columnas(fila) { const m = {}; (fila || []).forEach((v, c) => { const k = norm(v); if (k && m[k] === undefined) m[k] = c; }); return m; }
+function filaTitulos(filas, requeridos) {
+  for (let i = 0; i < Math.min(filas.length, 30); i++) { const m = columnas(filas[i]); if (requeridos.every((r) => m[r] !== undefined)) return { fila: i, m }; }
+  return null;
+}
+export function esFormatoCesantoni(hojas) {
+  const b = hojaPor(hojas, 'BASE');
+  return !!(b && filaTitulos(hojas[b], ['DESTINO ENVIO', 'KG.', 'TARIMAS']));
+}
+function interpretarCesantoni(hojas) {
+  const avisos = [], base = hojas[hojaPor(hojas, 'BASE')], log = hojas[hojaPor(hojas, 'LOGISTICA')] || [];
+  const folio = valorJunto(base, 'FOLIO') || valorJunto(log, 'FOLIO');
+  // La clasificación (DD, C…) va debajo de su etiqueta.
+  const clasificacion = valorJunto(base, 'CLASIFICACION', 8, true) || valorJunto(log, 'CLASIFICACION', 8, true);
+  const toneladas = num(valorJunto(base, 'TONELAJE'));
+  if (!folio) avisos.push('No se encontró el número de folio (celda junto a «Folio:» en la hoja Base). Escríbelo a mano.');
+  const t = filaTitulos(base, ['DESTINO ENVIO', 'KG.', 'TARIMAS']), m = t.m;
+  const g = (f, k) => (m[k] === undefined ? '' : f[m[k]]);
+  const paradas = new Map(), clientes = new Set(), pedidos = new Set();
+  let partidas = 0;
+  for (let i = t.fila + 1; i < base.length; i++) {
+    const f = base[i] || [];
+    const codigo = texto(g(f, 'DESTINO ENVIO')), kgs = num(g(f, 'KG.'));
+    if (!codigo || /^TOTAL/.test(norm(f.find((x) => texto(x)) || ''))) continue;
+    if (!kgs && !num(g(f, 'CANT ENVIADA')) && !num(g(f, 'CANTIDAD ENVIADA'))) continue;
+    partidas++;
+    const cliente = texto(g(f, 'CLIENTE')) || texto(g(f, 'NOMBRE VENTA'));
+    if (cliente) clientes.add(cliente);
+    if (texto(g(f, 'NUMERO ORDEN'))) pedidos.add(texto(g(f, 'NUMERO ORDEN')));
+    if (!paradas.has(codigo)) {
+      paradas.set(codigo, { codigo, sucursal: texto(g(f, 'NOM SUCURSAL')) || cliente, ciudad: texto(g(f, 'DESTINO')) || texto(g(f, 'CD SUCURSAL')),
+        tarimas: 0, restos_liso: 0, restos_deco: 0, peso_kg: 0, m2: 0, partidas: 0 });
+    }
+    const p = paradas.get(codigo);
+    p.tarimas += num(g(f, 'TARIMAS')); p.restos_liso += num(g(f, 'RESTOS TARIMA - LISO')); p.restos_deco += num(g(f, 'RESTOS TARIMA - DECO'));
+    p.peso_kg += kgs; p.m2 += num(g(f, 'MTS')); p.partidas++;
+  }
+  const lista = [...paradas.values()].map((p) => Object.assign(p, { peso_kg: redondeo(p.peso_kg, 2), m2: redondeo(p.m2, 2), tarimas: redondeo(p.tarimas, 2) }));
+  if (!lista.length) avisos.push('La hoja Base no trae partidas con destino y kilos.');
+  const pesoBase = lista.reduce((s, p) => s + p.peso_kg, 0);
+  if (toneladas && Math.abs(toneladas * 1000 - pesoBase) > 1) avisos.push('El tonelaje del encabezado (' + toneladas.toFixed(3) + ' t) no coincide con la suma de kilos de Base (' + (pesoBase / 1000).toFixed(3) + ' t). Revisa el archivo.');
+  // CB360 y Exhibición
+  const hojas2 = [], extra = { peso_kg: 0, tarimas: 0 };
+  [['CB360', 'CB360', ['PESO (KGS)']], ['EXHIBICION', 'Exhibición', ['PESO (KGS)']]].forEach(([clave, etiqueta, req]) => {
+    const n = hojaPor(hojas, clave);
+    if (!n) return;
+    const tt = filaTitulos(hojas[n], req);
+    if (!tt) return;
+    let kgs = 0, esp = 0, filas = 0;
+    for (let i = tt.fila + 1; i < hojas[n].length; i++) {
+      const f = hojas[n][i] || [];
+      if (/^TOTAL/.test(norm(f.find((x) => texto(x)) || ''))) continue;
+      const k = num(f[tt.m['PESO (KGS)']]), e = tt.m.ESPACIOS === undefined ? 0 : num(f[tt.m.ESPACIOS]);
+      if (!k && !e) continue;
+      kgs += k; esp += e; filas++;
+    }
+    if (filas) { hojas2.push(etiqueta); extra.peso_kg += kgs; extra.tarimas += esp; }
+  });
+  const tarimasTot = lista.reduce((s, p) => s + p.tarimas, 0) + extra.tarimas;
+  const restos = lista.reduce((s, p) => s + p.restos_liso + p.restos_deco, 0);
+  const peso = redondeo(pesoBase + extra.peso_kg, 0);
+  const grupo = {
+    folio: combinarFolios([folio]) || '', cliente: [...clientes].join(' / '), destino: [...new Set(lista.map((p) => p.ciudad))].join(' / '),
+    hojas: (lista.length ? ['Base'] : []).concat(hojas2), clasificacion, pedidos: [...pedidos],
+    tarimas: redondeo(tarimasTot, 2), resto: restos, peso_kg: peso, tipo_unidad: tipoUnidad(peso), renglones: partidas,
+    paradas: lista, extra
+  };
+  return { grupos: lista.length || folio ? [grupo] : [], avisos };
+}
+/* Junta varios folios en un mismo embarque: «549/35298» (sin letra), paradas y totales sumados. */
+export function combinar(grupos) {
+  const paradas = [];
+  grupos.forEach((g) => (g.paradas || []).forEach((p) => {
+    const ya = paradas.find((x) => x.codigo === p.codigo);
+    if (!ya) paradas.push(Object.assign({}, p));
+    else ['tarimas', 'restos_liso', 'restos_deco', 'peso_kg', 'm2', 'partidas'].forEach((k) => { ya[k] = redondeo(ya[k] + p[k], 2); });
+  }));
+  const peso = redondeo(grupos.reduce((s, g) => s + (Number(g.peso_kg) || 0), 0), 0);
+  const uni = (k) => [...new Set(grupos.flatMap((g) => String(g[k] || '').split(' / ')).filter(Boolean))].join(' / ');
+  return {
+    folio: combinarFolios(grupos.map((g) => g.folio)), cliente: uni('cliente'), destino: uni('destino'),
+    hojas: [...new Set(grupos.flatMap((g) => g.hojas || []))], clasificacion: uni('clasificacion'),
+    tarimas: redondeo(grupos.reduce((s, g) => s + (Number(g.tarimas) || 0), 0), 2), resto: grupos.reduce((s, g) => s + (Number(g.resto) || 0), 0),
+    peso_kg: peso, tipo_unidad: tipoUnidad(peso), renglones: grupos.reduce((s, g) => s + (g.renglones || 0), 0), paradas
+  };
+}
+
+/* Libro → { grupos: [...], avisos: [...] }. Con el Formato de Acopio CESANTONI sale un grupo (el folio del archivo);
+   con otros formatos, un grupo por cliente + destino. */
 export function interpretar(hojas) {
+  if (esFormatoCesantoni(hojas)) return interpretarCesantoni(hojas);
   const avisos = [], renglones = [];
   const nombres = Object.keys(hojas);
   HOJAS.forEach(([clave, etiqueta]) => {

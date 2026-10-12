@@ -105,6 +105,9 @@ export async function crearFolios(grupos) {
       tx.set(ref, {
         folio: g.folio, cliente: g.cliente, destino: g.destino, hojas: g.hojas || [],
         tarimas: Number(g.tarimas) || 0, resto: Number(g.resto) || 0, peso_kg: Number(g.peso_kg) || 0, tipo_unidad: g.tipo_unidad,
+        clasificacion: String(g.clasificacion || ''), paradas: (g.paradas || []).slice(0, 40).map((p) => ({
+          codigo: String(p.codigo || ''), sucursal: String(p.sucursal || ''), ciudad: String(p.ciudad || ''), tarimas: Number(p.tarimas) || 0,
+          restos_liso: Number(p.restos_liso) || 0, restos_deco: Number(p.restos_deco) || 0, peso_kg: Number(p.peso_kg) || 0, m2: Number(p.m2) || 0 })),
         estatus: 'RECIBIDO', motivo: '', docs: { factura: false, carta_porte: false, remision: false },
         transportista: '', unidad: '', cita: '', anden: '', salida: '', entregado: '',
         creado: ahora(), actualizado: ahora(), creado_por: sesion.area

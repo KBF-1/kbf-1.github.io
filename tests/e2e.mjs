@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 
 const BASE = 'http://localhost:5500/', EMU = '?emu=1', P = 'proveedores-cesantoni';
 const ACOPIO = process.env.ACOPIO || fileURLToPath(new URL('./acopio.xlsx', import.meta.url));
+const ACOPIO_CES = process.env.ACOPIO_CES || fileURLToPath(new URL('./acopio-cesantoni.xlsm', import.meta.url));
+const ACOPIO_CES2 = process.env.ACOPIO_CES2 || fileURLToPath(new URL('./acopio-cesantoni-2.xlsm', import.meta.url));
 const SALIDA = process.env.CAPTURAS || '';
 let ok = 0, mal = 0;
 const check = (cond, nombre) => { if (cond) { ok++; console.log('  ✓ ' + nombre); } else { mal++; console.log('  ✗ ' + nombre); } };
@@ -81,6 +83,22 @@ await page.locator('#acopio').setInputFiles(ACOPIO);
 await page.getByRole('button', { name: /Crear 4 folio/ }).click();
 await esperarToast('Ya existían');
 check(true, 'volver a subir el acopio no duplica folios');
+// Formato de Acopio CESANTONI: dos archivos a la vez y juntarlos en un embarque
+await page.locator('#acopio').setInputFiles([ACOPIO_CES, ACOPIO_CES2]);
+await page.getByRole('button', { name: /Crear 2 folio/ }).waitFor();
+const folios2 = await page.locator('.tabla.compacta tbody input[aria-label="folio"]').evaluateAll((els) => els.map((e) => e.value));
+check(JSON.stringify(folios2) === JSON.stringify(['7777A', '8888']), 'formato CESANTONI: un folio por archivo (7777A y 8888)');
+check(await page.locator('.paradas-t', { hasText: 'PRUEBA Suc. QRO' }).count() === 2, 'muestra el detalle por destino de envío');
+await page.getByRole('button', { name: 'Juntar marcados en un embarque' }).click();
+await page.getByRole('button', { name: /Crear 1 folio/ }).waitFor();
+check((await page.locator('.tabla.compacta tbody input[aria-label="folio"]').inputValue()) === '7777/8888', 'juntados: folio 7777/8888 sin letra');
+check(await page.locator('.tabla.compacta .tipo.full').count() === 1, 'embarque de 83 t marcado FULL');
+await page.getByRole('button', { name: /Crear 1 folio/ }).click();
+await esperarToast('1 folio(s) creados');
+await page.locator('.tabla tbody tr', { hasText: '7777/8888' }).first().click();
+await page.locator('.modal .paradas-t').waitFor();
+check(await page.locator('.modal .paradas-t tbody tr').count() === 2, 'la ficha del folio muestra sus 2 destinos de envío');
+await page.locator('.modal .btn-x').click();
 await salir();
 
 console.log('Operación');

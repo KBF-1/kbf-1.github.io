@@ -1,8 +1,8 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
 import * as API from './datos.js';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, tarimas, norm, combinarFolios } from './reglas.js';
-import { leerLibro, interpretar } from './acopio.js';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios } from './reglas.js';
+import { leerLibro, interpretar, combinar } from './acopio.js';
 import { planear } from './ruta.js';
 import { ubicacion } from './gps.js';
 import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js';
@@ -156,72 +156,108 @@ async function ficha(f) {
   modal('Folio ' + f.folio,
     h('div', { class: 'ficha' },
       dato('Estatus', pill(f.estatus)), dato('Cliente', f.cliente), dato('Destino', f.destino || '—'),
-      dato('Tarimas', String(f.tarimas) + (f.resto ? ' (resto ' + f.resto + ')' : '')), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad),
+      dato('Tarimas', String(f.tarimas) + (f.resto ? ' + ' + f.resto + ' cajas sueltas' : '')), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad),
+      f.clasificacion ? dato('Clasificación', f.clasificacion) : null,
       dato('Documentos', DOCUMENTOS.map(([k, n]) => (f.docs && f.docs[k] ? '✓ ' : '✗ ') + n).join('  ')),
       f.motivo ? dato('Motivo', f.motivo) : null,
       f.transportista ? dato('Transportista', f.transportista + (f.unidad ? ' · ' + f.unidad : '')) : null,
       f.cita ? dato('Cita', fecha(f.cita) + (f.anden ? ' · andén ' + f.anden : '')) : null,
       f.hojas && f.hojas.length ? dato('Hojas del acopio', f.hojas.join(', ')) : null),
+    f.paradas && f.paradas.length ? [h('h3', null, 'Destinos de envío'), h('div', { class: 'tabla-scroll' }, tablaParadas(f.paradas))] : null,
     h('h3', null, 'Historial'), hist);
   try { const r = await API.historial(f.id); mount(hist, r.length ? r.map((x) => h('li', null, h('b', null, fecha(x.fecha)), ' · ', CFG.areas[x.area] ? CFG.areas[x.area].nombre : x.area, ' — ', x.texto)) : h('li', { class: 'gris' }, 'Sin movimientos.')); }
   catch (e) { mount(hist, h('li', { class: 'gris' }, API.amigable(e))); }
 }
 const dato = (t, v) => h('div', { class: 'dato' }, h('span', null, t), h('b', null, v));
+/* Lugares de entrega del folio: cada destino de envío del acopio («sucursal · ciudad»), o el destino escrito a mano. */
+const lugaresDe = (f) => (f.paradas && f.paradas.length
+  ? [...new Set(f.paradas.map((p) => [p.sucursal, p.ciudad].filter(Boolean).join(' · ')))]
+  : [f.destino]).filter(Boolean);
 
 /* ================================================================== VENTAS */
 async function ventas() {
   const lista = (await API.folios()).sort(porFecha);
   const vista = h('div');
-  const archivo = entrada({ type: 'file', accept: '.xlsx,.xlsm', id: 'acopio' });
+  const archivo = entrada({ type: 'file', accept: '.xlsx,.xlsm', id: 'acopio', multiple: true });
   const previa = h('div');
   archivo.addEventListener('change', async () => {
-    const f = archivo.files[0];
-    if (!f) return;
-    mount(previa, h('p', { class: 'gris' }, 'Leyendo ' + f.name + '…'));
-    try { const r = interpretar(await leerLibro(new Uint8Array(await f.arrayBuffer()))); mostrarPrevia(previa, r.grupos, r.avisos, f.name); }
-    catch (e) { mount(previa, h('p', { class: 'aviso mal' }, e.message)); }
+    const archivos = [...archivo.files];
+    if (!archivos.length) return;
+    mount(previa, h('p', { class: 'gris' }, 'Leyendo ' + archivos.length + ' archivo(s)…'));
+    const grupos = [], avisos = [];
+    for (const f of archivos) {
+      try {
+        const r = interpretar(await leerLibro(new Uint8Array(await f.arrayBuffer())));
+        r.grupos.forEach((g) => grupos.push(Object.assign(g, { archivo: f.name })));
+        r.avisos.forEach((a) => avisos.push(f.name + ': ' + a));
+      } catch (e) { avisos.push(f.name + ': ' + e.message); }
+    }
+    mostrarPrevia(previa, grupos, avisos, archivos.length === 1 ? archivos[0].name : archivos.length + ' archivos');
+    archivo.value = '';
   });
   mount(main, vista);
   mount(vista,
-    encabezado('Ventas', 'Sube el Formato de Acopio: se separa por cliente y destino, se calculan tarimas y peso, y cada pedido queda como folio «Recibido».'),
+    encabezado('Ventas', 'Sube uno o varios Formatos de Acopio: cada archivo es un folio con sus destinos de envío, tarimas, restos y peso. Quedan como «Recibido».'),
     h('section', { class: 'tarjeta' },
       h('h2', null, 'Formato de Acopio'),
-      campo('Archivo (.xlsx o .xlsm)', archivo, 'Se leen las hojas Base, CB360 y Exhibición. Antes de crear los folios puedes revisar y corregir todo.'),
+      campo('Archivos (.xlsm o .xlsx)', archivo, 'Puedes elegir varios a la vez. Se leen las hojas Base, CB360 y Exhibición. Antes de crear los folios puedes revisar, corregir y juntar folios que viajan en la misma unidad.'),
       h('button', { class: 'btn chico', type: 'button', onclick: () => mostrarPrevia(previa, [], [], 'captura a mano') }, 'Capturar sin archivo'),
       previa),
     h('section', { class: 'tarjeta' }, h('h2', null, 'Folios'),
       tabla(lista, [
         ['Folio', (f) => h('b', null, f.folio)], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
-        ['Peso', (f) => kg(f.peso_kg), 'num'], ['Tipo', (f) => f.tipo_unidad], ['Docs', docsChip, 'centro'],
+        ['Tarimas', (f) => String(f.tarimas), 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'], ['Tipo', (f) => f.tipo_unidad], ['Docs', docsChip, 'centro'],
         ['Estatus', (f) => pill(f.estatus)], ['Alta', (f) => fecha(f.creado)]
       ], ficha)));
+}
+/* Detalle por destino de envío (sucursal). */
+function tablaParadas(paradas) {
+  if (!paradas || !paradas.length) return null;
+  return h('table', { class: 'tabla compacta paradas-t' },
+    h('thead', null, h('tr', null, ['Destino envío', 'Sucursal', 'Ciudad', 'Tarimas', 'Restos (cajas)', 'Peso', 'm²'].map((t) => h('th', null, t)))),
+    h('tbody', null, paradas.map((p) => h('tr', null, h('td', null, p.codigo || '—'), h('td', null, p.sucursal), h('td', null, p.ciudad),
+      h('td', { class: 'num' }, String(p.tarimas)), h('td', { class: 'num' }, (Number(p.restos_liso) || 0) + (Number(p.restos_deco) || 0) ? (p.restos_liso || 0) + ' liso · ' + (p.restos_deco || 0) + ' deco' : '—'),
+      h('td', { class: 'num' }, kg(p.peso_kg)), h('td', { class: 'num' }, p.m2 ? String(p.m2) : '—')))));
 }
 function mostrarPrevia(destino, grupos, avisos, nombre) {
   const filas = grupos.map((g) => Object.assign({ incluir: true }, g));
   const cuerpo = h('tbody'), total = h('p', { class: 'gris' });
   const btn = h('button', { class: 'btn primario', type: 'button' }, 'Crear folios');
-  const recalcular = (r) => {
-    const t = tarimas(r.tarimas);
-    r.tarimas = t.total; r.resto = t.resto; r.tipo_unidad = tipoUnidad(r.peso_kg); r.folio = combinarFolios(r.folio);
-  };
+  const juntar = h('button', { class: 'btn', type: 'button', title: 'Para folios que viajan en la misma unidad' }, 'Juntar marcados en un embarque');
+  const recalcular = (r) => { r.tipo_unidad = tipoUnidad(r.peso_kg); r.folio = combinarFolios(r.folio); };
   const pintar = () => {
-    mount(cuerpo, filas.map((r, i) => {
+    mount(cuerpo, filas.flatMap((r, i) => {
       const num = (k, paso) => entrada({ type: 'number', min: 0, step: paso, value: r[k], class: 'entrada corta', 'aria-label': k,
         onchange: (e) => { r[k] = Number(e.target.value) || 0; recalcular(r); pintar(); } });
       const txt = (k, ph) => entrada({ value: r[k], placeholder: ph, 'aria-label': k, onchange: (e) => { r[k] = e.target.value.trim(); if (k === 'folio') recalcular(r); pintar(); } });
-      return h('tr', { class: r.incluir ? '' : 'apagado' },
+      const fila = h('tr', { class: r.incluir ? '' : 'apagado' },
         h('td', null, h('input', { type: 'checkbox', checked: r.incluir, 'aria-label': 'Incluir', onchange: (e) => { r.incluir = e.target.checked; pintar(); } })),
-        h('td', null, txt('folio', '12345 o 12345/12346')), h('td', null, txt('cliente', '')), h('td', null, txt('destino', '')),
-        h('td', { class: 'gris chico' }, (r.hojas || []).join(', ')),
-        h('td', null, num('tarimas', 0.01)), h('td', { class: 'num' }, r.resto ? String(r.resto) : '—'), h('td', null, num('peso_kg', 1)),
+        h('td', null, txt('folio', '12345 o 12345/12346'), r.clasificacion ? h('small', { class: 'gris' }, 'Clasificación ' + r.clasificacion) : null),
+        h('td', null, txt('cliente', '')), h('td', null, txt('destino', '')),
+        h('td', null, num('tarimas', 0.01)), h('td', null, num('resto', 1)), h('td', null, num('peso_kg', 1)),
         h('td', null, h('b', { class: r.tipo_unidad === 'FULL' ? 'tipo full' : 'tipo' }, r.tipo_unidad)),
         h('td', null, h('button', { class: 'btn-x', 'aria-label': 'Quitar renglón', onclick: () => { filas.splice(i, 1); pintar(); } }, '×')));
+      const det = r.paradas && r.paradas.length ? h('tr', { class: 'detalle' + (r.incluir ? '' : ' apagado') }, h('td'), h('td', { colspan: 8 },
+        h('small', { class: 'gris' }, [r.archivo, (r.hojas || []).length ? 'hojas ' + r.hojas.join(', ') : '', r.renglones ? r.renglones + ' partidas' : ''].filter(Boolean).join(' · ')),
+        tablaParadas(r.paradas))) : null;
+      return [fila, det].filter(Boolean);
     }));
     const sel = filas.filter((r) => r.incluir);
-    total.textContent = sel.length + ' folio(s) · ' + kg(sel.reduce((t, r) => t + r.peso_kg, 0)) + ' · ' + sel.reduce((t, r) => t + r.tarimas, 0).toFixed(2) + ' tarimas';
+    total.textContent = sel.length + ' folio(s) · ' + kg(sel.reduce((t, r) => t + (Number(r.peso_kg) || 0), 0)) + ' · ' + sel.reduce((t, r) => t + (Number(r.tarimas) || 0), 0) + ' tarimas';
     btn.textContent = 'Crear ' + sel.length + ' folio(s)';
     btn.disabled = !sel.length;
+    juntar.hidden = sel.length < 2;
   };
+  juntar.addEventListener('click', () => {
+    const sel = filas.filter((r) => r.incluir);
+    if (sel.length < 2) return;
+    const uno = Object.assign({ incluir: true, archivo: sel.map((r) => r.archivo).filter(Boolean).join(' + ') }, combinar(sel));
+    const pos = filas.indexOf(sel[0]);
+    sel.forEach((r) => filas.splice(filas.indexOf(r), 1));
+    filas.splice(pos, 0, uno);
+    toast('Embarque ' + uno.folio + ': ' + kg(uno.peso_kg) + ' · ' + uno.tipo_unidad);
+    pintar();
+  });
   btn.addEventListener('click', async () => {
     const sel = filas.filter((r) => r.incluir);
     const falta = sel.find((r) => !r.folio || !r.cliente);
@@ -239,12 +275,12 @@ function mostrarPrevia(destino, grupos, avisos, nombre) {
   mount(destino,
     h('h3', null, 'Revisión · ' + nombre),
     avisos.map((a) => h('p', { class: 'aviso' }, a)),
-    h('p', { class: 'gris chico' }, 'Reglas: folios combinados con «/» y sin letra pegada; SENCILLO hasta 40 t, FULL arriba de 40 t. Corrige lo que haga falta.'),
+    h('p', { class: 'gris chico' }, 'Reglas: folios combinados con «/» y sin letra pegada; SENCILLO hasta 40 t, FULL arriba de 40 t. Restos = cajas sueltas que no completan tarima. Corrige lo que haga falta.'),
     h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' },
-      h('thead', null, h('tr', null, ['', 'Folio', 'Cliente', 'Destino', 'Hojas', 'Tarimas', 'Resto', 'Peso (kg)', 'Tipo', ''].map((t) => h('th', null, t)))), cuerpo)),
+      h('thead', null, h('tr', null, ['', 'Folio', 'Cliente', 'Destino', 'Tarimas', 'Restos (cajas)', 'Peso (kg)', 'Tipo', ''].map((t) => h('th', null, t)))), cuerpo)),
     h('div', { class: 'acciones' },
       h('button', { class: 'btn chico', type: 'button', onclick: () => { filas.push({ incluir: true, folio: '', cliente: '', destino: '', hojas: [], tarimas: 0, resto: 0, peso_kg: 0, tipo_unidad: 'SENCILLO' }); pintar(); } }, '+ Agregar renglón'),
-      total, btn));
+      juntar, total, btn));
 }
 
 /* ================================================================== OPERACIÓN */
@@ -402,7 +438,8 @@ async function monitoreo() {
   let L = null, mapa = null, capa = null;
   try { L = await cargarMapa(); mapa = mapaEn(L, mapaDiv, origen); capa = L.layerGroup().addTo(mapa); L.marker([origen.lat, origen.lng], { title: origen.nombre }).addTo(mapa).bindTooltip(origen.nombre); }
   catch (e) { mount(mapaDiv, h('p', { class: 'gris centro' }, e.message)); }
-  const coordsDe = (f) => destinos.find((d) => norm(d.nombre) === norm(f.destino));
+  // Para simular el avance se usa el primer lugar de entrega que tenga coordenadas.
+  const coordsDe = (f) => lugaresDe(f).map((l) => destinos.find((d) => norm(d.nombre) === norm(l))).find(Boolean);
   const actualizar = async () => {
     if (!enRuta.length) return;
     const token = await API.tokenGps();
@@ -417,7 +454,7 @@ async function monitoreo() {
       }
       return h('article', { class: 'unidad' },
         h('div', { class: 'unidad-cab' }, h('b', null, f.folio), h('span', { class: 'fuente ' + (real ? 'real' : 'sim') }, real ? 'GPS REAL' : 'SIMULADO')),
-        h('p', null, f.cliente, ' → ', f.destino || 'sin destino'),
+        h('p', null, f.cliente, ' → ', lugaresDe(f).join(' / ') || 'sin destino'),
         h('p', { class: 'gris chico' }, [f.transportista, f.unidad, d.operador, d.placas].filter(Boolean).join(' · ')),
         h('p', null, h('b', null, p.velocidad + ' km/h'), ' · ', fecha(p.hora), p.faltan_km !== undefined && !real ? ' · faltan ~' + p.faltan_km + ' km' : '', p.lugar ? ' · ' + p.lugar : ''),
         !real && p.motivo ? h('p', { class: 'gris chico' }, p.motivo) : null,
@@ -433,31 +470,33 @@ async function monitoreo() {
 async function ruta() {
   const [todos, destinos, general, rutas] = await Promise.all([API.folios(), API.catalogo('destinos'), API.config('general'), API.catalogo('rutas')]);
   const origen = general.lat ? general : CFG.origen;
-  const candidatos = todos.filter((f) => !['ENTREGADO', 'EN_RUTA'].includes(f.estatus)).sort((a, b) => a.destino.localeCompare(b.destino));
+  const candidatos = todos.filter((f) => !['ENTREGADO', 'EN_RUTA'].includes(f.estatus)).sort((a, b) => String(a.destino).localeCompare(String(b.destino)));
   const elegidos = new Set();
   const coords = new Map(destinos.map((d) => [norm(d.nombre), d]));
   const regresa = h('input', { type: 'checkbox', id: 'regresa' });
   const resultado = h('div');
-  const filas = candidatos.map((f) => {
-    const d = coords.get(norm(f.destino));
-    const c = entrada({ value: d ? d.lat + ', ' + d.lng : '', placeholder: 'lat, lng', class: 'entrada corta-l', 'aria-label': 'Coordenadas de ' + f.destino,
+  const campoCoords = (lugar) => {
+    const d = coords.get(norm(lugar));
+    return h('label', { class: 'coord' }, h('small', null, lugar), entrada({ value: d ? d.lat + ', ' + d.lng : '', placeholder: 'lat, lng', class: 'entrada corta-l', 'aria-label': 'Coordenadas de ' + lugar,
       onchange: async (e) => {
         const p = leerCoordenadas(e.target.value);
         if (!p) { toast('Escribe latitud y longitud, por ejemplo 19.4326, -99.1332 (en Google Maps: clic derecho sobre el lugar).', true); return; }
-        try { const id = await API.guardarEn('destinos', d ? d.id : null, { nombre: f.destino, lat: p.lat, lng: p.lng }); coords.set(norm(f.destino), { id, nombre: f.destino, lat: p.lat, lng: p.lng }); e.target.value = p.lat + ', ' + p.lng; toast('Coordenadas guardadas para ' + f.destino + '.'); } catch (x) { err(x); }
-      } });
-    return h('tr', null, h('td', null, h('input', { type: 'checkbox', 'aria-label': 'Incluir ' + f.folio, onchange: (e) => (e.target.checked ? elegidos.add(f.id) : elegidos.delete(f.id)) })),
-      h('td', null, h('b', null, f.folio)), h('td', null, f.cliente), h('td', null, f.destino), h('td', null, kg(f.peso_kg)), h('td', null, pill(f.estatus)), h('td', null, c));
-  });
+        const ya = coords.get(norm(lugar));
+        try { const id = await API.guardarEn('destinos', ya ? ya.id : null, { nombre: lugar, lat: p.lat, lng: p.lng }); coords.set(norm(lugar), { id, nombre: lugar, lat: p.lat, lng: p.lng }); e.target.value = p.lat + ', ' + p.lng; toast('Coordenadas guardadas para ' + lugar + '.'); } catch (x) { err(x); }
+      } }));
+  };
+  const filas = candidatos.map((f) => h('tr', null, h('td', null, h('input', { type: 'checkbox', 'aria-label': 'Incluir ' + f.folio, onchange: (e) => (e.target.checked ? elegidos.add(f.id) : elegidos.delete(f.id)) })),
+    h('td', null, h('b', null, f.folio)), h('td', null, f.cliente), h('td', null, kg(f.peso_kg)), h('td', null, pill(f.estatus)),
+    h('td', null, h('div', { class: 'coords' }, lugaresDe(f).map(campoCoords)))));
   const calcular = h('button', { class: 'btn primario' }, 'Calcular ruta más corta');
   calcular.addEventListener('click', async () => {
     const sel = candidatos.filter((f) => elegidos.has(f.id));
     if (sel.length < 1) { toast('Elige al menos un folio.', true); return; }
-    const sin = sel.filter((f) => !coords.get(norm(f.destino)));
-    if (sin.length) { toast('Faltan coordenadas de: ' + [...new Set(sin.map((f) => f.destino))].join(', '), true); return; }
-    // Varios folios al mismo destino = una sola parada.
+    const sin = [...new Set(sel.flatMap(lugaresDe).filter((l) => !coords.get(norm(l))))];
+    if (sin.length) { toast('Faltan coordenadas de: ' + sin.join(', '), true); return; }
+    // Cada lugar de entrega es una parada; varios folios al mismo lugar = una sola parada.
     const paradas = [];
-    sel.forEach((f) => { const d = coords.get(norm(f.destino)); let p = paradas.find((x) => norm(x.nombre) === norm(f.destino)); if (!p) paradas.push(p = { nombre: f.destino, lat: d.lat, lng: d.lng, folios: [] }); p.folios.push(f.folio); });
+    sel.forEach((f) => lugaresDe(f).forEach((l) => { const d = coords.get(norm(l)); let p = paradas.find((x) => norm(x.nombre) === norm(l)); if (!p) paradas.push(p = { nombre: l, lat: d.lat, lng: d.lng, folios: [] }); if (!p.folios.includes(f.folio)) p.folios.push(f.folio); }));
     const plan = planear(origen, paradas, regresa.checked);
     await pintarRuta(resultado, origen, plan, regresa.checked, sel);
   });
@@ -465,8 +504,8 @@ async function ruta() {
     h('p', { class: 'aviso' }, 'Aproximación por distancia en línea recta: no es la distancia real por carretera. El cálculo se hace aquí mismo; no usa Samsara ni se manda a otro sistema.'),
     h('section', { class: 'tarjeta' },
       h('p', { class: 'gris chico' }, 'Sale de: ', h('b', null, origen.nombre), ' (' + origen.lat + ', ' + origen.lng + '). Las coordenadas de cada destino se capturan una vez y se reutilizan.'),
-      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['', 'Folio', 'Cliente', 'Destino', 'Peso', 'Estatus', 'Coordenadas'].map((t) => h('th', null, t)))),
-        h('tbody', null, filas.length ? filas : h('tr', null, h('td', { colspan: 7, class: 'gris centro' }, 'No hay folios pendientes.'))))),
+      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['', 'Folio', 'Cliente', 'Peso', 'Estatus', 'Lugares de entrega y coordenadas'].map((t) => h('th', null, t)))),
+        h('tbody', null, filas.length ? filas : h('tr', null, h('td', { colspan: 6, class: 'gris centro' }, 'No hay folios pendientes.'))))),
       h('div', { class: 'acciones' }, h('label', { class: 'casilla' }, regresa, ' Regresar al origen al terminar'), calcular)),
     resultado,
     rutas.length ? h('section', { class: 'tarjeta' }, h('h2', null, 'Rutas guardadas'), h('ul', { class: 'historial' },
