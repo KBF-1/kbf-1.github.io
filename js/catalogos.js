@@ -3,7 +3,7 @@
    - «Fletes» (hoja CATALOGOS): tarifa y tarifa LP por destino, clasificación del cliente y datos de pago del transportista.
    Las columnas se buscan por su título, así que el orden puede cambiar. Nada de esto se guarda en el sitio (es público):
    se guarda en Firebase, en lc_config, que solo leen Transporte y Administrador. */
-import { norm } from './reglas.js?v=13';
+import { norm } from './reglas.js?v=14';
 
 const texto = (v) => { const t = String(v === undefined || v === null ? '' : v).replace(/\s+/g, ' ').trim(); return /^#(N\/A|VALUE!|REF!|DIV\/0!|NAME\?)$/i.test(t) ? '' : t; };
 const numero = (v) => { const t = String(v === undefined || v === null ? '' : v).replace(/[$,\s]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) ? null : n; };
@@ -74,14 +74,22 @@ export function combinarCatalogos({ seguimiento, fletes, actuales }) {
   const base = (x) => llave(String(x || '').replace(/\b(S\.?\s*A\.?|S\.?\s*DE\s*R\.?\s*L\.?|DE\s*C\.?\s*V\.?|S\.?\s*A\.?\s*P\.?\s*I\.?)\b/gi, '')
     .replace(/^\s*(AUTO\s*TRANSPORTES|AUTOTRANSPORTES|TRANSPORTES|TRANSPORTE|AUTO\s*EXPRESS|AUTOEXPRESS)\s+(EL\s+|LA\s+|LOS\s+)?/i, ''));
   const igual = (a, b) => { a = base(a); b = base(b); return a.length > 3 && b.length > 3 && (a === b || a.startsWith(b) || b.startsWith(a)); };
+  // Palabras de un nombre sin artículos ni sufijos de sociedad; «EXPRES» = «EXPRESS».
+  const palabras = (x) => norm(x).replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter((w) => w && !['DE', 'DEL', 'LA', 'LOS', 'LAS', 'Y', 'SA', 'CV', 'RL', 'S', 'TRANSPORTES', 'TRANSPORTE'].includes(w)).map((w) => (w.length > 4 ? w.replace(/S+$/, '') : w));
+  const contenido = (a, b, minimo = 3) => { const pa = palabras(a), pb = new Set(palabras(b)); return pa.length >= minimo && pa.every((w) => pb.has(w)); };
+  const correos = (x) => String(x || '').toLowerCase().match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) || [];
   (fletes ? fletes.transportistas : []).forEach((f) => {
     const k = llave(f.razon_social);
-    // Si la razón social no empata (persona física con otro nombre comercial), se busca por correo.
-    const correos = (x) => String(x || '').toLowerCase().match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) || [];
     const deF = correos(f.correo);
+    // Si la razón social no empata (persona física con otro nombre comercial), se busca por correo.
     const t = [...porNombre.values()].find((x) => (x.alias_fletes || []).some((a) => llave(a) === k))
       || [...porNombre.values()].find((x) => igual(x.razon_social, f.razon_social) || igual(x.nombre, f.razon_social))
+      // Misma persona con un nombre de más o de menos («CARLOS DEL VILLAR ACUÑA» ⊂ «CARLOS ALEJANDRO DEL VILLAR ACUÑA»).
+      || [...porNombre.values()].find((x) => contenido(f.razon_social, x.razon_social))
+      // Correo que trae el nombre comercial («internacional.lopez@…» → TRANSPORTES LOPEZ INTERNACIONAL).
+      || [...porNombre.values()].find((x) => deF.some((c) => contenido(c.split('@')[0].replace(/[._\d-]+/g, ' '), x.nombre, 2)))
       || (deF.length ? [...porNombre.values()].find((x) => correos([x.correo, x.correo2].join(' ')).some((c) => deF.includes(c))) : null);
+    // Lo que no empata se queda como transportista con su razón social.
     const extra = { plazo_pago: f.plazo_pago, iva: f.iva, correo_pagos: f.correo };
     const mismaRazon = t && (igual(t.razon_social, f.razon_social) || igual(t.nombre, f.razon_social) || (t.alias_fletes || []).some((a) => llave(a) === k));
     if (t && mismaRazon) Object.assign(t, extra, (t.alias_fletes || []).some((a) => llave(a) === k) ? { razon_social_fletes: f.razon_social } : {});

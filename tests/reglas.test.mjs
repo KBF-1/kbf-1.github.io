@@ -166,6 +166,14 @@ test('Catálogos de Nacional (Seguimiento + Fletes)', async () => {
   assert.equal(r.tarifas.find((t) => t.destino === 'LEON').tarifa, 260);          // se usa la Tarifa LP de Fletes
   assert.equal(fb.razon_social_fletes, 'MARIA PERSONA FISICA');                    // empata por correo
   assert.equal(r.transportistas.some((t) => t.nombre === 'MARIA PERSONA FISICA'), false);
+  // Razón social con un nombre de menos, «EXPRES» = «EXPRESS» y nombre comercial en el correo
+  const h = combinarCatalogos({ seguimiento: { transportistas: [
+    { nombre: 'TRANSPORTES SOL', razon_social: 'PEDRO ALBERTO GOMEZ RUIZ', telefono: '1' },
+    { nombre: 'TRANSPORTES TEX', razon_social: 'TERRESTRE EXPRESS DEL NORTE', telefono: '2' },
+    { nombre: 'TRANSPORTES RIOS INTERNACIONAL', razon_social: 'ANA RIOS', telefono: '3' }], destinos: [], clientes: [] },
+  fletes: { transportistas: [{ razon_social: 'PEDRO GOMEZ RUIZ', plazo_pago: 30 }, { razon_social: 'TERRESTRE EXPRES DEL NORTE', plazo_pago: 45 },
+    { razon_social: 'ANA RIOS PEREZ', correo: 'internacional.rios@mail.example', plazo_pago: 60 }, { razon_social: 'OTRA PERSONA FISICA', plazo_pago: 15 }], destinos: [], clientes: [] }, actuales: {} });
+  assert.deepEqual(h.transportistas.map((t) => [t.nombre, t.plazo_pago]), [['OTRA PERSONA FISICA', 15], ['TRANSPORTES RIOS INTERNACIONAL', 60], ['TRANSPORTES SOL', 30], ['TRANSPORTES TEX', 45]]);
   // Unir a mano y que al reimportar se empate solo
   const lista = [{ nombre: 'TRANSPORTES SOL' , telefono: '1' }, { nombre: 'PEDRO PERSONA', razon_social: 'PEDRO PERSONA', plazo_pago: 15 }];
   const unida = unirTransportista(lista, 'PEDRO PERSONA', 'TRANSPORTES SOL');
