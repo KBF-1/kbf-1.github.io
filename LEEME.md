@@ -120,6 +120,8 @@ Mientras tanto, todo el Monitoreo funciona con datos simulados.
 
 ## Pendiente
 
-- Envío real de correos de alertas (hoy simulado).
+- Envío real de correos de alertas (hoy simulado). **Requisito: cobertura de 10,000 correos por día.** El plan gratuito de Firebase
+  y Gmail/Apps Script no alcanzan; hace falta un servicio de envío (Microsoft 365/Graph desde un buzón dedicado o un proveedor como
+  Amazon SES o SendGrid) llamado desde un servidor (Cloud Function, plan Blaze).
 - Puente de Samsara publicado (hoy el Monitoreo es simulado).
 - Registro automático de folios desde el correo de Outlook (por definir: qué correos, modificaciones y desde qué fecha).
