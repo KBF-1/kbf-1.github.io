@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Control de Embarques | Somos Logística CESANTONI</title>
+  <meta name="description" content="Flujo del embarque: Ventas, Operación, Transporte y monitoreo.">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0D1114">
+  <link rel="icon" type="image/png" sizes="32x32" href="img/icono-32.png">
+  <link rel="apple-touch-icon" href="img/icono-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
+  <script>/* Si hay una versión nueva publicada, recarga una vez para no quedarse con la página guardada en el navegador. */
+    (function () { var V = '1'; try { fetch('version.txt?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
+      t = String(t || '').trim(); if (!t || t === V || sessionStorage.getItem('recarga-' + t)) return;
+      sessionStorage.setItem('recarga-' + t, '1'); var u = new URL(location.href); u.searchParams.set('_v', t); location.replace(u.href); }).catch(function () {}); } catch (e) {} })();</script>
+  <link rel="stylesheet" href="css/estilos.css?v=1">
+</head>
+<body>
+  <div class="franja"></div>
+  <header class="barra"><div class="barra-in">
+    <span class="logos" id="logos"></span>
+    <span class="titulo-app">Control de Embarques</span>
+    <span class="espacio"></span>
+    <span id="cuenta" class="cuenta"></span>
+  </div></header>
+  <div class="app">
+    <nav class="lateral" id="nav" aria-label="Menú" hidden></nav>
+    <main class="contenedor" id="main"><p class="gris">Cargando…</p></main>
+  </div>
+  <div id="avisos" aria-live="polite"></div>
+  <script src="js/config.js?v=1"></script>
+  <script type="module" src="js/app.js?v=1"></script>
+</body>
+</html>
