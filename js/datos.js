@@ -1,7 +1,7 @@
 /* Acceso a Firebase (colecciones lc_). Las reglas de Firestore repiten cada permiso en el servidor:
    ocultar un botón aquí no es lo que protege los datos. */
-import * as fb from './firebase-sdk.js';
-import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js';
+import * as fb from './firebase-sdk.js?v=7';
+import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=7';
 
 const CFG = window.LC_CONFIG;
 const params = new URLSearchParams(location.search);

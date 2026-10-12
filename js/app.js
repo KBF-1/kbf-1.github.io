@@ -1,12 +1,12 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
-import * as API from './datos.js';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js';
-import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js';
-import { leerLibro, interpretar, combinar } from './acopio.js';
-import { planear } from './ruta.js';
-import { ubicacion } from './gps.js';
-import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js';
+import * as API from './datos.js?v=7';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=7';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=7';
+import { leerLibro, interpretar, combinar } from './acopio.js?v=7';
+import { planear } from './ruta.js?v=7';
+import { ubicacion } from './gps.js?v=7';
+import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=7';
 
 const CFG = window.LC_CONFIG;
 const main = document.getElementById('main'), nav = document.getElementById('nav'), cuenta = document.getElementById('cuenta');

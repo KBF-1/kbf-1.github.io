@@ -104,7 +104,7 @@ await esperarToast('4 folio(s) creados');
 await page.locator('.tabla tbody tr', { hasText: '22001' }).first().waitFor();
 check(await page.locator('.tabla tbody tr', { hasText: '22001' }).count() === 1, 'folios creados y listados');
 const prohibido = await page.evaluate(async () => {
-  const fb = await import('./js/firebase-sdk.js'); const app = fb.getApps().find((a) => a.name === 'logistica');
+  const fb = await import('./js/firebase-sdk.js?v=' + document.querySelector('script[src*="app.js"]').src.split('?v=')[1]); const app = fb.getApps().find((a) => a.name === 'logistica');
   try { await fb.getDocs(fb.collection(fb.getFirestore(app), 'lc_despachos')); return 'leyó'; } catch (e) { return e.code; }
 });
 check(prohibido === 'permission-denied', 'Ventas pidiendo despachos (tarifas) directo al servidor: denegado');
@@ -151,7 +151,7 @@ const fila = (f) => page.locator('.tabla tbody tr', { hasText: f });
 const opcionListo = fila('22001').locator('select option[value="LISTO"]');
 check(await opcionListo.isDisabled(), 'sin documentos, «Listo para transporte» está deshabilitado');
 const forzado = await page.evaluate(async () => {
-  const fb = await import('./js/firebase-sdk.js'); const db = fb.getFirestore(fb.getApps().find((a) => a.name === 'logistica'));
+  const fb = await import('./js/firebase-sdk.js?v=' + document.querySelector('script[src*="app.js"]').src.split('?v=')[1]); const db = fb.getFirestore(fb.getApps().find((a) => a.name === 'logistica'));
   try { await fb.updateDoc(fb.doc(db, 'lc_folios', '22001'), { estatus: 'LISTO' }); return 'pasó'; } catch (e) { return e.code; }
 });
 check(forzado === 'permission-denied', 'forzar LISTO sin documentos directo al servidor: rechazado');
@@ -247,7 +247,7 @@ const textos = (await page.locator('.alertas li').allTextContents()).join(' ');
 check(/SIN checklist/.test(textos) && /sobrepeso/.test(textos) && /reprobado/.test(textos) && /PARADO/.test(textos), 'alertas: sin checklist, sobrepeso, checklist reprobado y parado');
 await foto('06-alertas');
 const pass = await page.evaluate(async () => {
-  const fb = await import('./js/firebase-sdk.js'); const db = fb.getFirestore(fb.getApps().find((a) => a.name === 'logistica'));
+  const fb = await import('./js/firebase-sdk.js?v=' + document.querySelector('script[src*="app.js"]').src.split('?v=')[1]); const db = fb.getFirestore(fb.getApps().find((a) => a.name === 'logistica'));
   return (await fb.getDoc(fb.doc(db, 'lc_despachos', '22001'))).data().tarifa;
 });
 check(pass === 18500, 'tarifa guardada en el despacho (privado)');
