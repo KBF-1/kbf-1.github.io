@@ -81,6 +81,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn:hover { background: #F3F1ED; }
 .btn.primario { background: var(--tinta); color: #fff; }
 .btn.primario:hover { background: #2A3036; }
+.btn.peligro { border-color: var(--rojo); color: var(--rojo); }
+.btn.peligro:hover { background: var(--rojo-bg); }
 .btn:disabled { opacity: .55; cursor: default; }
 .btn.chico { min-height: 32px; padding: 4px 10px; font-size: 13px; }
 .btn-x { border: 0; background: none; font-size: 22px; line-height: 1; cursor: pointer; color: var(--gris); padding: 4px 8px; }

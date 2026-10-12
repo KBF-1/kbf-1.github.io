@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
 
 const env = await initializeTestEnvironment({ projectId: 'proveedores-cesantoni', firestore: { rules: readFileSync(process.env.REGLAS || 'firestore.rules', 'utf8'), host: '127.0.0.1', port: 8080 } });
 const ahora = Math.floor(Date.now() / 1000);
@@ -116,6 +116,16 @@ test('Alertas e historial: con el área de quien escribe', async () => {
   await assertSucceeds(updateDoc(doc(como('ventas'), 'lc_alertas', 'A1'), { leida: true }));
   await assertFails(updateDoc(doc(como('ventas'), 'lc_alertas', 'A1'), { texto: 'cambiado' }));
   await assertSucceeds(setDoc(doc(como('ventas'), 'lc_folios', 'F2', 'historial', 'h1'), { area: 'ventas', por: CORREO.ventas, texto: 'x', fecha: 'x' }));
+});
+test('Borrar folio: solo Administrador (con historial)', async () => {
+  await env.withSecurityRulesDisabled(async (c) => {
+    await setDoc(doc(c.firestore(), 'lc_folios', 'B1'), folio({ folio: 'B1' }));
+    await setDoc(doc(c.firestore(), 'lc_folios', 'B1', 'historial', 'h'), { area: 'ventas', por: CORREO.ventas, texto: 'x' });
+  });
+  await assertFails(deleteDoc(doc(como('ventas'), 'lc_folios', 'B1')));
+  await assertFails(deleteDoc(doc(como('transporte'), 'lc_folios', 'B1', 'historial', 'h')));
+  await assertSucceeds(deleteDoc(doc(como('admin'), 'lc_folios', 'B1', 'historial', 'h')));
+  await assertSucceeds(deleteDoc(doc(como('admin'), 'lc_folios', 'B1')));
 });
 test('La sesión vence a las 12 horas', async () => {
   await assertSucceeds(getDoc(doc(como('transporte', 11.9), 'lc_despachos', 'F1')));

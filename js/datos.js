@@ -1,7 +1,7 @@
 /* Acceso a Firebase (colecciones lc_). Las reglas de Firestore repiten cada permiso en el servidor:
    ocultar un botón aquí no es lo que protege los datos. */
-import * as fb from './firebase-sdk.js?v=9';
-import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=9';
+import * as fb from './firebase-sdk.js?v=10';
+import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=10';
 
 const CFG = window.LC_CONFIG;
 const params = new URLSearchParams(location.search);
@@ -104,6 +104,16 @@ export async function borrarUsuario(correo) { await fb.deleteDoc(D('lc_usuarios'
 /* ------------------------------------------------------------------ folios */
 export async function folios() { return lista(await fb.getDocs(C('lc_folios'))); }
 export async function folio(id) { const s = await fb.getDoc(D('lc_folios', id)); return s.exists() ? Object.assign({ id }, s.data()) : null; }
+/* Borra el folio con todo lo suyo: historial, despacho (tarifa, checklist) y su renglón en la Pantalla. Solo Administrador. */
+export async function borrarFolio(f) {
+  const hist = await fb.getDocs(fb.collection(db, 'lc_folios', f.id, 'historial'));
+  const docs = hist.docs.map((d) => d.ref).concat([D('lc_despachos', f.id), D('lc_pantalla', f.id), D('lc_folios', f.id)]);
+  for (let i = 0; i < docs.length; i += 450) {
+    const b = fb.writeBatch(db);
+    docs.slice(i, i + 450).forEach((r) => b.delete(r));
+    await b.commit();
+  }
+}
 export async function historial(id) {
   return lista(await fb.getDocs(fb.collection(db, 'lc_folios', id, 'historial'))).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
 }

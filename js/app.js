@@ -1,12 +1,12 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
-import * as API from './datos.js?v=9';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=9';
-import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=9';
-import { leerLibro, interpretar, combinar } from './acopio.js?v=9';
-import { planear } from './ruta.js?v=9';
-import { ubicacion } from './gps.js?v=9';
-import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=9';
+import * as API from './datos.js?v=10';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=10';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=10';
+import { leerLibro, interpretar, combinar } from './acopio.js?v=10';
+import { planear } from './ruta.js?v=10';
+import { ubicacion } from './gps.js?v=10';
+import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=10';
 
 const CFG = window.LC_CONFIG;
 const main = document.getElementById('main'), nav = document.getElementById('nav'), cuenta = document.getElementById('cuenta');
@@ -185,9 +185,22 @@ async function ficha(f) {
     f.entrega ? [h('h3', null, 'Entrega (Última Milla)'), bloqueEntrega(f)] : null,
     f.paradas && f.paradas.length ? [h('h3', null, 'Destinos de envío'), h('div', { class: 'tabla-scroll' }, tablaParadas(f.paradas))] : null,
     f.material && f.material.length ? [h('h3', null, 'Material (' + f.material.length + ' partidas)'), tablaMaterial(f.material)] : null,
-    h('h3', null, 'Historial'), hist);
+    h('h3', null, 'Historial'), hist,
+    puede('admin') ? h('div', { class: 'acciones separado' }, h('button', { class: 'btn peligro', type: 'button', onclick: (e) => borrarFolio(f, e.currentTarget) }, 'Borrar folio')) : null);
   try { const r = await API.historial(f.id); mount(hist, r.length ? r.map((x) => h('li', null, h('b', null, fecha(x.fecha)), ' · ', CFG.areas[x.area] ? CFG.areas[x.area].nombre : x.area, x.por ? ' (' + x.por + ')' : '', ' — ', x.texto)) : h('li', { class: 'gris' }, 'Sin movimientos.')); }
   catch (e) { mount(hist, h('li', { class: 'gris' }, API.amigable(e))); }
+}
+/* Borrar un folio (solo Administrador): pide escribir el número para no borrar por accidente. */
+async function borrarFolio(f, btn) {
+  const escrito = prompt('Se borrará el folio ' + f.folio + ' con su historial, despacho y tarifa. No se puede deshacer.\n\nEscribe el número de folio para confirmar:');
+  if (escrito === null) return;
+  if (escrito.trim().toUpperCase() !== String(f.folio).toUpperCase()) { toast('El número no coincide; no se borró.', true); return; }
+  try {
+    await ocupado(btn, () => API.borrarFolio(f), 'Borrando…');
+    document.querySelectorAll('dialog.modal').forEach((d) => d.close());
+    toast('Folio ' + f.folio + ' borrado.');
+    irA(location.hash.slice(1));
+  } catch (e) { err(e); }
 }
 const dato = (t, v) => h('div', { class: 'dato' }, h('span', null, t), h('b', null, v));
 /* Datos de entrega de Última Milla: dirección, quién recibe, teléfonos, descarga y liga de Google Maps. */
