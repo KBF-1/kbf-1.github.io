@@ -33,8 +33,12 @@ async function crear(correo) {
   await page.locator('#clave').fill(CLAVE); await page.locator('#clave2').fill(CLAVE);
   await page.getByRole('button', { name: 'Crear mi contraseña' }).click();
   await page.getByRole('heading', { name: 'Confirma tu correo' }).waitFor();
-  const r = await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/oobCodes`)).json();
-  const c = r.oobCodes.filter((x) => x.email === correo.toLowerCase() && x.requestType === 'VERIFY_EMAIL').pop();
+  let c = null;
+  for (let i = 0; i < 40 && !c; i++) { // el correo de confirmación se manda un instante después de crear la cuenta
+    const r = await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/oobCodes`)).json();
+    c = (r.oobCodes || []).filter((x) => x.email === correo.toLowerCase() && x.requestType === 'VERIFY_EMAIL').pop();
+    if (!c) await page.waitForTimeout(250);
+  }
   await fetch(c.oobLink); // equivale a dar clic en la liga del correo
   await page.getByRole('button', { name: 'Ya lo confirmé' }).click();
 }
@@ -186,6 +190,7 @@ await page.getByLabel('Operador').fill('Juan Pérez');
 await page.getByLabel('Fecha y hora de cita').fill('2026-10-13T09:30');
 await page.getByLabel('Andén').fill('4');
 await page.getByLabel('Tarifa negociada (MXN)').fill('18500');
+check(await page.locator('.modal h3', { hasText: 'Checklist pre-salida' }).count() === 0, 'Nacional: el despacho no lleva checklist');
 await foto('03-despacho');
 await page.getByRole('button', { name: 'Guardar asignación' }).click();
 await esperarToast('Asignación guardada');
@@ -195,13 +200,19 @@ check(await celdaTarifa.count() === 1, 'tarifa visible para Transporte');
 await page.locator('.tabla tbody tr', { hasText: '22001' }).click();
 await page.getByRole('button', { name: 'Salir a ruta (activar GPS)' }).click();
 await esperarToast('en ruta');
-check(true, 'salió a ruta sin checklist (con confirmación)');
-// Folio con checklist reprobado
-await page.locator('.tabla tbody tr', { hasText: '12345/12346' }).click();
+check(true, 'Nacional sale a ruta sin checklist');
+// Última Milla: tarifa opcional y checklist pre-salida
+await page.getByRole('tab', { name: /^Última Milla/ }).click();
+await page.getByRole('tab', { name: /^Todos/ }).click();
+check(await page.locator('.tabla tbody tr', { hasText: '22001' }).count() === 0 && await page.locator('.tabla tbody tr', { hasText: '9001' }).count() === 1, 'Transporte separa Nacional y Última Milla');
+await page.locator('.tabla tbody tr', { hasText: '9001' }).click();
 await page.getByLabel('Unidad', { exact: true }).selectOption({ index: 1 });
+await page.getByLabel('No aplica tarifa').check();
 await page.getByRole('button', { name: 'Guardar asignación' }).click();
 await esperarToast('Asignación guardada');
-await page.locator('.tabla tbody tr', { hasText: '12345/12346' }).click();
+await page.locator('.tabla tbody tr', { hasText: '9001' }).locator('td', { hasText: 'No aplica' }).waitFor();
+check(true, 'Última Milla: «No aplica tarifa»');
+await page.locator('.tabla tbody tr', { hasText: '9001' }).click();
 for (const p of ['Llantas', 'Luces', 'Frenos', 'Espejos', 'Cinturones', 'Extintor', 'Documentos del vehículo', 'Combustible']) {
   await page.getByRole('radiogroup', { name: p }).getByText(p === 'Frenos' ? 'Falla' : 'Bien').click();
 }
@@ -244,7 +255,7 @@ await foto('05-monitoreo');
 await ir('alertas', 'Alertas');
 await page.locator('.alertas li').first().waitFor();
 const textos = (await page.locator('.alertas li').allTextContents()).join(' ');
-check(/SIN checklist/.test(textos) && /sobrepeso/.test(textos) && /reprobado/.test(textos) && /PARADO/.test(textos), 'alertas: sin checklist, sobrepeso, checklist reprobado y parado');
+check(!/SIN checklist/.test(textos) && /sobrepeso/.test(textos) && /reprobado en 9001/.test(textos) && /PARADO/.test(textos), 'alertas: sobrepeso, checklist reprobado (Última Milla) y parado; Nacional no genera alerta de checklist');
 await foto('06-alertas');
 const pass = await page.evaluate(async () => {
   const fb = await import('./js/firebase-sdk.js?v=' + document.querySelector('script[src*="app.js"]').src.split('?v=')[1]); const db = fb.getFirestore(fb.getApps().find((a) => a.name === 'logistica'));

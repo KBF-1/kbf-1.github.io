@@ -126,6 +126,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .segmento { display: inline-flex; border: 1px solid var(--linea); border-radius: 99px; overflow: hidden; margin-right: 10px; flex: none; }
 .segmento button { border: 0; background: var(--blanco); padding: 7px 14px; font-weight: 600; font-size: 13px; cursor: pointer; }
 .segmento button + button { border-left: 1px solid var(--linea); }
+.segmento.grande { margin-bottom: 6px; }
+.segmento.grande button { padding: 10px 22px; font-size: 15px; }
 .segmento button.activa { background: var(--tinta); color: #fff; }
 .filtros { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: none; }
 .filtros .entrada { max-width: 360px; }

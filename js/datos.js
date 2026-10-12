@@ -1,7 +1,7 @@
 /* Acceso a Firebase (colecciones lc_). Las reglas de Firestore repiten cada permiso en el servidor:
    ocultar un botón aquí no es lo que protege los datos. */
-import * as fb from './firebase-sdk.js?v=7';
-import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=7';
+import * as fb from './firebase-sdk.js?v=8';
+import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=8';
 
 const CFG = window.LC_CONFIG;
 const params = new URLSearchParams(location.search);
@@ -212,7 +212,7 @@ export async function salirARuta(f, revision) {
   b.update(D('lc_folios', f.id), { estatus: 'EN_RUTA', salida: ahora(), actualizado: ahora() });
   espejo(b, f, { estatus: 'EN_RUTA' });
   bitacora(b, f.id, 'Salió a ruta; monitoreo GPS activo');
-  if (!revision.contestado) alertaEn(b, 'sin_checklist', f, 'El folio ' + f.folio + ' salió a ruta SIN checklist pre-salida.');
+  if (!revision) { /* Nacional: no lleva checklist */ } else if (!revision.contestado) alertaEn(b, 'sin_checklist', f, 'El folio ' + f.folio + ' salió a ruta SIN checklist pre-salida.');
   else if (!revision.pasa) alertaEn(b, 'checklist', f, 'El folio ' + f.folio + ' salió a ruta con checklist reprobado: ' + revision.reprobados.join(', '));
   await b.commit();
 }

@@ -1,12 +1,12 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
-import * as API from './datos.js?v=7';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=7';
-import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=7';
-import { leerLibro, interpretar, combinar } from './acopio.js?v=7';
-import { planear } from './ruta.js?v=7';
-import { ubicacion } from './gps.js?v=7';
-import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=7';
+import * as API from './datos.js?v=8';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=8';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=8';
+import { leerLibro, interpretar, combinar } from './acopio.js?v=8';
+import { planear } from './ruta.js?v=8';
+import { ubicacion } from './gps.js?v=8';
+import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=8';
 
 const CFG = window.LC_CONFIG;
 const main = document.getElementById('main'), nav = document.getElementById('nav'), cuenta = document.getElementById('cuenta');
@@ -146,10 +146,10 @@ function contadores(lista, claves) {
   return h('div', { class: 'contadores' }, claves.map((k) => h('div', { class: 'contador-c ' + ESTATUS[k].color }, h('b', null, lista.filter((f) => f.estatus === k).length), h('span', null, ESTATUS[k].nombre))));
 }
 /* Tabla con buscador. columnas: [[título, (f) => contenido, clase?]] */
-function tabla(lista, columnas, alClic, vacio) {
+function tabla(lista, columnas, alClic, vacio, sinFiltroEnvio) {
   const cuerpo = h('tbody');
   const buscar = entrada({ type: 'search', placeholder: 'Buscar folio, cliente o destino…', 'aria-label': 'Buscar' });
-  let envio = leerFiltro();
+  let envio = sinFiltroEnvio ? 'todos' : leerFiltro();
   const chips = h('div', { class: 'segmento', role: 'group', 'aria-label': 'Tipo de envío' });
   const pintarChips = () => mount(chips, FILTROS_ENVIO.map(([k, t]) => h('button', { type: 'button', class: k === envio ? 'activa' : '', 'aria-pressed': String(k === envio),
     onclick: () => { envio = k; try { sessionStorage.setItem('lc-envio', k); } catch (e) { /* sin almacenamiento */ } pintarChips(); pintar(); } },
@@ -165,7 +165,7 @@ function tabla(lista, columnas, alClic, vacio) {
   buscar.addEventListener('input', pintar);
   pintarChips();
   pintar();
-  return h('div', null, h('div', { class: 'filtros' }, chips, buscar),
+  return h('div', null, h('div', { class: 'filtros' }, sinFiltroEnvio ? null : chips, buscar),
     h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla' }, h('thead', null, h('tr', null, columnas.map(([t, , c]) => h('th', { class: c || null }, t)))), cuerpo)));
 }
 /* Ficha del folio: datos, documentos e historial. */
@@ -359,7 +359,7 @@ async function operacion() {
       ['Tarimas', (f) => String(f.tarimas), 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'],
       ['Documentos', (f) => h('div', { class: 'docs-check' }, DOCUMENTOS.map(([k, n]) => h('label', null,
         h('input', { type: 'checkbox', checked: !!(f.docs && f.docs[k]), disabled: f.estatus === 'LISTO' && f.docs[k], title: f.estatus === 'LISTO' ? 'Para quitar un documento, primero regresa el folio de Listo' : null,
-          onchange: async (e) => { try { await API.marcarDocumento(f, k, e.target.checked); f.docs[k] = e.target.checked; operacion().catch(fallo); } catch (x) { e.target.checked = !e.target.checked; err(x); } } }), n)))],
+          onchange: async (e) => { try { await API.marcarDocumento(f, k, e.target.checked); f.docs[k] = e.target.checked; await operacion().catch(fallo); } catch (x) { e.target.checked = !e.target.checked; err(x); } } }), n)))],
       ['Estatus', (f) => estatusOperacion(f)]
     ], ficha, 'No hay folios pendientes de armar.')));
 }
@@ -377,16 +377,20 @@ function estatusOperacion(f) {
   guardar.addEventListener('click', cambiar);
   async function cambiar() {
     if (sel.value === 'PARADO' && !motivo.value.trim()) { toast('Escribe el motivo por el que está parado.', true); motivo.focus(); return; }
-    try { await ocupado(guardar, () => API.cambiarEstatus(f, sel.value, motivo.value)); toast(f.folio + ': ' + ESTATUS[sel.value].nombre); operacion().catch(fallo); }
+    try { const nuevo = sel.value; await ocupado(guardar, () => API.cambiarEstatus(f, nuevo, motivo.value)); await operacion().catch(fallo); toast(f.folio + ': ' + ESTATUS[nuevo].nombre); }
     catch (e) { sel.value = f.estatus; err(e); }
   }
   return caja;
 }
 
 /* ================================================================== TRANSPORTE */
+/* Nacional y Última Milla se despachan distinto: Nacional (transportistas externos) lleva tarifa y no lleva checklist;
+   Última Milla (unidades propias) lleva checklist pre-salida y la tarifa es opcional. */
 async function transporte() {
   const [todos, unidades, desp] = await Promise.all([API.folios(), API.catalogo('unidades'), API.despachos()]);
-  let filtro = sessionStorage.getItem('lc-filtro-tr') || 'listos';
+  const leer = (k, d) => { try { return sessionStorage.getItem(k) || d; } catch (e) { return d; } };
+  const fijar = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) { /* sin almacenamiento */ } };
+  let envio = leer('lc-envio-tr', 'NACIONAL'), filtro = leer('lc-filtro-tr', 'listos');
   const grupos = {
     listos: ['Listos para transporte', (f) => f.estatus === 'LISTO'],
     ruta: ['En ruta', (f) => f.estatus === 'EN_RUTA'],
@@ -395,32 +399,43 @@ async function transporte() {
     todos: ['Todos', () => true]
   };
   const zona = h('div');
+  const tarifaTxt = (f) => { const d = desp[f.id] || {}; return d.sin_tarifa ? h('span', { class: 'gris' }, 'No aplica') : d.tarifa ? pesos(d.tarifa) : '—'; };
   const pintar = () => {
-    sessionStorage.setItem('lc-filtro-tr', filtro);
-    const lista = todos.filter(grupos[filtro][1]).sort((a, b) => String(a.cita || '9').localeCompare(String(b.cita || '9')) || porFecha(a, b));
+    fijar('lc-envio-tr', envio); fijar('lc-filtro-tr', filtro);
+    const delTipo = todos.filter((f) => (f.tipo_envio || 'NACIONAL') === envio);
+    const lista = delTipo.filter(grupos[filtro][1]).sort((a, b) => String(a.cita || '9').localeCompare(String(b.cita || '9')) || porFecha(a, b));
+    const um = envio === 'ULTIMA_MILLA';
+    const columnas = [
+      ['Folio', (f) => h('b', null, f.folio)], ['Cliente', (f) => (um && f.entrega && f.entrega.recibe) || f.cliente], ['Destino', (f) => f.destino],
+      ['Peso', (f) => h('span', null, kg(f.peso_kg), h('br'), h('small', { class: 'gris' }, f.tipo_unidad)), 'num'],
+      ['Transportista', (f) => f.transportista ? h('span', null, f.transportista, h('br'), h('small', { class: 'gris' }, f.unidad)) : h('span', { class: 'gris' }, 'Sin asignar')],
+      ['Cita', (f) => f.cita ? fecha(f.cita) + (f.anden ? ' · A' + f.anden : '') : '—'],
+      ['Tarifa', tarifaTxt, 'num'],
+      um ? ['Checklist', (f) => { const r = revisarChecklist(desp[f.id] && desp[f.id].checklist); return h('span', { class: 'docs ' + (r.pasa ? 'ok' : r.contestado ? 'no' : 'medio') }, r.pasa ? 'Aprobado' : r.contestado ? 'Reprobado' : 'Pendiente'); }] : null,
+      ['Estatus', (f) => pill(f.estatus)]
+    ].filter(Boolean);
     mount(zona,
-      h('div', { class: 'pestanas', role: 'tablist' }, Object.entries(grupos).map(([k, [t, fn]]) => h('button', { role: 'tab', 'aria-selected': String(k === filtro), class: k === filtro ? 'activa' : '', onclick: () => { filtro = k; pintar(); } }, t + ' (' + todos.filter(fn).length + ')'))),
-      h('section', { class: 'tarjeta' }, tabla(lista, [
-        ['Folio', (f) => h('b', null, f.folio)], ['Envío', envioChip], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
-        ['Peso', (f) => h('span', null, kg(f.peso_kg), h('br'), h('small', { class: 'gris' }, f.tipo_unidad)), 'num'],
-        ['Transportista', (f) => f.transportista ? h('span', null, f.transportista, h('br'), h('small', { class: 'gris' }, f.unidad)) : h('span', { class: 'gris' }, 'Sin asignar')],
-        ['Cita', (f) => f.cita ? fecha(f.cita) + (f.anden ? ' · A' + f.anden : '') : '—'],
-        ['Tarifa', (f) => desp[f.id] && desp[f.id].tarifa ? pesos(desp[f.id].tarifa) : '—', 'num'],
-        ['Checklist', (f) => { const r = revisarChecklist(desp[f.id] && desp[f.id].checklist); return h('span', { class: 'docs ' + (r.pasa ? 'ok' : r.contestado ? 'no' : 'medio') }, r.pasa ? 'Aprobado' : r.contestado ? 'Reprobado' : 'Pendiente'); }],
-        ['Estatus', (f) => pill(f.estatus)]
-      ], (f) => panelDespacho(f, unidades, desp[f.id] || {}), 'No hay folios en esta vista.')));
+      h('div', { class: 'segmento grande', role: 'tablist', 'aria-label': 'Tipo de envío' }, [['NACIONAL', 'Nacional'], ['ULTIMA_MILLA', 'Última Milla']].map(([k, t]) =>
+        h('button', { type: 'button', role: 'tab', 'aria-selected': String(k === envio), class: k === envio ? 'activa' : '', onclick: () => { envio = k; pintar(); } },
+          t + ' (' + todos.filter((f) => (f.tipo_envio || 'NACIONAL') === k && f.estatus !== 'ENTREGADO').length + ')'))),
+      h('p', { class: 'gris chico' }, um ? 'Última Milla: unidades propias, lleva checklist pre-salida; la tarifa es opcional.' : 'Nacional: transportistas externos, lleva tarifa; no lleva checklist pre-salida.'),
+      h('div', { class: 'pestanas', role: 'tablist' }, Object.entries(grupos).map(([k, [t, fn]]) => h('button', { role: 'tab', 'aria-selected': String(k === filtro), class: k === filtro ? 'activa' : '', onclick: () => { filtro = k; pintar(); } }, t + ' (' + delTipo.filter(fn).length + ')'))),
+      h('section', { class: 'tarjeta' }, tabla(lista, columnas, (f) => panelDespacho(f, unidades, desp[f.id] || {}), 'No hay folios en esta vista.', true)));
   };
-  mount(main, encabezado('Transporte', 'Asigna transportista y unidad, captura la cita y la tarifa, contesta el checklist y manda a ruta.',
+  mount(main, encabezado('Transporte', 'Asigna transportista y unidad, captura la cita y manda a ruta.',
     h('a', { class: 'btn', href: '#catalogos' }, 'Catálogo de unidades')), zona);
   pintar();
 }
 
 function panelDespacho(f, unidades, d) {
+  const um = esUM(f);
   const uSel = selector([['', 'Elige una unidad…']].concat(unidades.sort((a, b) => (a.transportista + a.nombre).localeCompare(b.transportista + b.nombre))
     .map((u) => [u.id, u.transportista + ' · ' + u.nombre + ' · ' + u.tipo + ' · ' + toneladas(u.capacidad_kg)])), d.unidad_id || '');
   const transportista = entrada({ value: f.transportista || '' }), operador = entrada({ value: d.operador || '' }), placas = entrada({ value: d.placas || '' });
   const cita = entrada({ type: 'datetime-local', value: f.cita || '' }), anden = entrada({ value: f.anden || '', maxlength: 10 });
-  const tarifa = entrada({ type: 'number', min: 0, step: '0.01', value: d.tarifa || '' });
+  const tarifa = entrada({ type: 'number', min: 0, step: '0.01', value: d.tarifa || '', disabled: !!d.sin_tarifa });
+  // Última Milla: la tarifa es opcional (unidad propia, sin costo de flete).
+  const sinTarifa = h('input', { type: 'checkbox', checked: !!d.sin_tarifa, onchange: (e) => { tarifa.disabled = e.target.checked; if (e.target.checked) tarifa.value = ''; } });
   const avisoPeso = h('p', { class: 'aviso', hidden: true });
   const unidad = () => unidades.find((u) => u.id === uSel.value);
   const revisarPeso = () => {
@@ -439,7 +454,9 @@ function panelDespacho(f, unidades, d) {
       alerta = 'Folio ' + f.folio + ' asignado a ' + u.nombre + ' con sobrepeso: ' + kg(f.peso_kg) + ' contra ' + kg(u.capacidad_kg) + ' de capacidad.';
     }
     const publico = { transportista: transportista.value.trim(), unidad: u ? u.nombre + ' (' + u.tipo + ')' : '', cita: cita.value, anden: anden.value.trim() };
-    const privado = { unidad_id: u ? u.id : '', samsara_id: u ? u.samsara_id || '' : '', operador: operador.value.trim(), placas: placas.value.trim().toUpperCase(), tarifa: Number(tarifa.value) || 0 };
+    if (!um && !(Number(tarifa.value) > 0) && !confirm('No capturaste la tarifa negociada. ¿Guardar sin tarifa?')) return;
+    const privado = { unidad_id: u ? u.id : '', samsara_id: u ? u.samsara_id || '' : '', operador: operador.value.trim(), placas: placas.value.trim().toUpperCase(),
+      tarifa: um && sinTarifa.checked ? 0 : Number(tarifa.value) || 0, sin_tarifa: um && sinTarifa.checked };
     try { await ocupado(guardar, () => API.guardarDespacho(f, publico, privado, alerta)); toast('Asignación guardada.'); dlg.cerrar(); transporte().catch(fallo); } catch (e) { err(e); }
   });
 
@@ -459,9 +476,10 @@ function panelDespacho(f, unidades, d) {
   if (f.estatus === 'LISTO') {
     const salir = h('button', { class: 'btn primario' }, 'Salir a ruta (activar GPS)');
     salir.addEventListener('click', async () => {
-      const r = revisarChecklist(d.checklist);
       if (!f.transportista) { toast('Primero guarda la asignación de transportista y unidad.', true); return; }
-      if (!r.pasa && !confirm(r.contestado ? 'El checklist está reprobado. ¿Salir de todos modos? Se registrará una alerta.' : 'No se ha contestado el checklist pre-salida. ¿Salir de todos modos? Se registrará una alerta.')) return;
+      // Nacional no lleva checklist pre-salida: sale sin revisar ni alertar.
+      const r = um ? revisarChecklist(d.checklist) : null;
+      if (um && !r.pasa && !confirm(r.contestado ? 'El checklist está reprobado. ¿Salir de todos modos? Se registrará una alerta.' : 'No se ha contestado el checklist pre-salida. ¿Salir de todos modos? Se registrará una alerta.')) return;
       try { await ocupado(salir, () => API.salirARuta(f, r)); toast(f.folio + ' en ruta. Monitoreo activo.'); dlg.cerrar(); transporte().catch(fallo); } catch (e) { err(e); }
     });
     acciones.push(salir);
@@ -473,7 +491,7 @@ function panelDespacho(f, unidades, d) {
     acciones.push(h('p', { class: 'aviso' }, 'Este folio sigue en almacén (' + ESTATUS[f.estatus].nombre + '). Puedes asignarlo, pero sale a ruta hasta que Operación lo marque «Listo para transporte».'));
   }
 
-  const dlg = modal('Despacho · ' + f.folio,
+  const dlg = modal('Despacho ' + (um ? 'Última Milla' : 'Nacional') + ' · ' + f.folio,
     h('div', { class: 'ficha' }, dato('Cliente', f.cliente), dato('Destino', f.destino || '—'), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad), dato('Tarimas', String(f.tarimas)), dato('Documentos', docsAvance(f.docs) + '/3'), dato('Estatus', pill(f.estatus))),
     f.entrega ? [h('h3', null, 'Entrega (Última Milla)'), bloqueEntrega(f)] : null,
     h('h3', null, 'Asignación'),
@@ -481,11 +499,13 @@ function panelDespacho(f, unidades, d) {
     h('div', { class: 'rejilla' },
       h('div', { class: 'todo' }, campo('Unidad', uSel)), h('div', { class: 'todo' }, avisoPeso),
       campo('Transportista', transportista), campo('Operador', operador), campo('Placas', placas),
-      campo('Fecha y hora de cita', cita), campo('Andén', anden), campo('Tarifa negociada (MXN)', tarifa, 'Solo la ven Transporte y Administrador.')),
+      campo('Fecha y hora de cita', cita), campo('Andén', anden),
+      h('div', null, campo(um ? 'Tarifa (MXN, opcional)' : 'Tarifa negociada (MXN)', tarifa, 'Solo la ven Transporte y Administrador.'),
+        um ? h('label', { class: 'casilla' }, sinTarifa, ' No aplica tarifa') : null)),
     h('div', { class: 'acciones' }, guardar),
-    h('h3', null, 'Checklist pre-salida'),
-    d.checklist_fecha ? h('p', { class: 'gris chico' }, 'Última revisión: ' + fecha(d.checklist_fecha)) : null,
-    lista, h('div', { class: 'acciones' }, guardarCk),
+    um ? [h('h3', null, 'Checklist pre-salida'),
+      d.checklist_fecha ? h('p', { class: 'gris chico' }, 'Última revisión: ' + fecha(d.checklist_fecha)) : null,
+      lista, h('div', { class: 'acciones' }, guardarCk)] : null,
     acciones.length ? h('div', { class: 'acciones separado' }, acciones) : null,
     h('p', null, h('button', { class: 'enlace', onclick: () => { dlg.cerrar(); ficha(f); } }, 'Ver historial del folio')));
 }

@@ -44,6 +44,7 @@ a las 12 horas de entrar.
 | Se guarda | Destinos de envío y **material partida por partida** (producto, SKU, lote, OC, cantidad, tarimas, restos, kg, m²) | Dirección, quién recibe, teléfonos, liga de Google Maps, descarga, observaciones, peso y metros |
 | Ubicación | Catálogos › Destinos Nacionales (liga de Maps o lat, lng) | Del Cuadro de Envío; si la liga es corta, se abre y se pega la liga larga |
 | Ruta | — | Última Milla (orden de entregas) |
+| Despacho (Transporte) | Transportista externo: **tarifa** negociada; **sin checklist** pre-salida | Unidad propia: **checklist** pre-salida de 8 puntos; tarifa **opcional** («No aplica tarifa») |
 
 Cada partida del acopio se revisa contra **Pesos, Embalajes y Estibas (AN-GCT-13 Rev. 16)** y el embalaje de adhesivos
 (`js/embalajes-datos.js`): formato, cajas por tarima, tarima, altura, estiba y rango de kilos esperado; marca las partidas fuera de rango.
