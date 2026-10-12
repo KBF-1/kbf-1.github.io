@@ -24,31 +24,41 @@ page.on('dialog', (d) => d.accept());
 const foto = async (n) => { if (SALIDA) await page.screenshot({ path: SALIDA + '/' + n + '.png', fullPage: true }); };
 const toast = async () => (await page.locator('.toast').allTextContents()).join(' | ');
 const esperarToast = async (texto) => { await page.locator('.toast', { hasText: texto }).first().waitFor({ timeout: 10000 }); };
-/* Entrar con la liga al correo: el emulador de Auth guarda las ligas en /oobCodes. */
-async function mandarLiga(correo) {
+/* Correo + contraseña personal. La primera vez se crea la cuenta y se verifica el correo con la liga que guarda el emulador. */
+const CLAVE = 'Clave-Prueba-1';
+async function crear(correo) {
   await page.goto(BASE + EMU);
+  await page.getByRole('button', { name: 'Primera vez: crear mi contraseña' }).click();
   await page.locator('#correo').fill(correo);
-  await page.getByRole('button', { name: 'Mandarme la liga' }).click();
-  await page.getByText('Revisa tu correo').waitFor();
+  await page.locator('#clave').fill(CLAVE); await page.locator('#clave2').fill(CLAVE);
+  await page.getByRole('button', { name: 'Crear mi contraseña' }).click();
+  await page.getByRole('heading', { name: 'Confirma tu correo' }).waitFor();
   const r = await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/oobCodes`)).json();
-  const c = r.oobCodes.filter((x) => x.email === correo && x.requestType === 'EMAIL_SIGNIN').pop();
-  const u = new URL(c.oobLink), destino = new URL(u.searchParams.get('continueUrl'));
-  ['mode', 'oobCode', 'apiKey', 'lang'].forEach((k) => { if (u.searchParams.get(k)) destino.searchParams.set(k, u.searchParams.get(k)); });
-  return destino.href;
+  const c = r.oobCodes.filter((x) => x.email === correo.toLowerCase() && x.requestType === 'VERIFY_EMAIL').pop();
+  await fetch(c.oobLink); // equivale a dar clic en la liga del correo
+  await page.getByRole('button', { name: 'Ya lo confirmé' }).click();
 }
 async function entrar(correo) {
-  await page.goto(await mandarLiga(correo));
+  await page.goto(BASE + EMU);
+  await page.locator('#correo').fill(correo);
+  await page.locator('#clave').fill(CLAVE);
+  await page.getByRole('button', { name: 'Entrar', exact: true }).click();
   await page.locator('#nav a').first().waitFor({ timeout: 20000 });
 }
-async function salir() { await page.getByRole('button', { name: 'Cerrar sesión' }).click(); await page.getByRole('button', { name: 'Mandarme la liga' }).waitFor(); }
+async function salir() { await page.getByRole('button', { name: 'Cerrar sesión' }).click(); await page.getByRole('button', { name: 'Entrar', exact: true }).waitFor(); }
 async function ir(hash, titulo) { await page.goto(BASE + EMU + '#' + hash); await page.locator('main h1', { hasText: titulo }).waitFor(); await page.locator('main .tabla, main .unidades, main .alertas, main .tarjeta p.gris').first().waitFor(); }
 const menu = async () => (await page.locator('#nav a b').allTextContents()).map((t) => t.replace(/\d+$/, '').trim());
 
 console.log('Acceso por correo');
-await page.goto(await mandarLiga('nadie@cesantoni.com.mx'));
+await crear('nadie@cesantoni.com.mx');
 await page.getByText('no tiene un área asignada').waitFor();
 check(true, 'correo sin área: no entra y lo explica');
-await entrar('jroman@cesantoni.com.mx');
+await page.locator('#correo').fill('ventas@cesantoni.com.mx'); await page.locator('#clave').fill(CLAVE);
+await page.getByRole('button', { name: 'Entrar', exact: true }).click();
+await page.getByText('Correo o contraseña incorrectos').waitFor();
+check(true, 'cuenta inexistente: pide crear contraseña');
+await crear('JRoman@cesantoni.com.mx');
+await page.locator('#nav a').first().waitFor({ timeout: 20000 });
 check((await page.locator('.chip-area').textContent()) === 'Administrador', 'jroman@cesantoni.com.mx entra como Administrador');
 check((await menu()).includes('Configuración'), 'Administrador ve Configuración');
 await ir('config', 'Configuración');
@@ -58,6 +68,10 @@ for (const [c, n, a] of [['ventas@cesantoni.com.mx', 'Vendedor Uno', 'ventas'], 
   await page.locator('td', { hasText: c.toLowerCase() }).waitFor();
 }
 check(await page.locator('td', { hasText: 'transporte@cesantoni.com.mx' }).count() === 1, 'alta de usuarios con su área (correo en minúsculas)');
+await salir();
+for (const c of ['ventas@cesantoni.com.mx', 'opera@cesantoni.com.mx', 'transporte@cesantoni.com.mx']) { await crear(c); await page.locator('#nav a').first().waitFor({ timeout: 20000 }); await salir(); }
+check(true, 'cada persona crea su contraseña y confirma su correo una sola vez');
+await entrar('jroman@cesantoni.com.mx');
 
 console.log('Transporte: catálogo de unidades');
 await ir('catalogos', 'Catálogos');

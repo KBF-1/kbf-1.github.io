@@ -30,6 +30,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .titulo-app { font-family: var(--titulos); font-weight: 600; font-size: 14px; color: var(--gris); }
 .espacio { flex: 1; }
 .cuenta { display: inline-flex; align-items: center; gap: 10px; }
+.enlaces { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 14px; }
 .quien { font-size: 13px; color: var(--gris); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .alta-usuario { display: grid; grid-template-columns: 2fr 2fr 1fr auto; gap: 8px; margin-bottom: 12px; }
 @media (max-width: 700px) { .alta-usuario { grid-template-columns: 1fr; } }

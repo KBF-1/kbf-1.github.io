@@ -13,16 +13,16 @@ de Proveedores (`pv_`) y de Movimientos (`sm_`). Nada se mezcla con esos sistema
 
 1. **Reglas:** Firebase › Firestore Database › Reglas › pega **todo** `firestore.rules` del repositorio `proveedores-cesantoni.github.io`
    (rama `claude/anden-mini-erp-transport-p2601k`, bloque «Logística CESANTONI», colecciones `lc_`) › Publicar.
-2. **Acceso por correo:** Firebase › Authentication › Sign-in method › Correo electrónico/contraseña › activa
-   **Vínculo de correo electrónico (acceso sin contraseña)**.
+2. **Acceso:** Firebase › Authentication › Sign-in method › **Correo electrónico/contraseña** activado.
 3. **Dominio:** Authentication › Settings › Authorized domains › `logistica-cesantoni.github.io`.
-4. Entra con `jroman@cesantoni.com.mx` (siempre es Administrador) y en **Configuración › Usuarios** da de alta a cada persona
-   con su correo y su área.
+4. Entra con `jroman@cesantoni.com.mx` (siempre es Administrador; la primera vez «Crear mi contraseña») y en
+   **Configuración › Usuarios** da de alta a cada persona con su correo y su área.
 
 ## Accesos
 
-Cada persona escribe su correo, le llega una liga (remitente `noreply@proveedores-cesantoni.firebaseapp.com`) y con un clic entra.
-No hay contraseñas. Su área está en `lc_usuarios/{correo}`:
+Cada persona entra con **su correo y su propia contraseña**. La primera vez usa «Crear mi contraseña» y confirma su correo con la liga
+que le llega (remitente `noreply@proveedores-cesantoni.firebaseapp.com`); después ya no se mandan correos, así que no choca con el límite
+diario del plan gratuito de Firebase. «Olvidé mi contraseña» manda una liga para cambiarla. Su área está en `lc_usuarios/{correo}`:
 
 | Área | Ve |
 |---|---|
@@ -33,7 +33,7 @@ No hay contraseñas. Su área está en `lc_usuarios/{correo}`:
 
 Las reglas de Firestore revisan en cada lectura y escritura que el correo esté verificado, dado de alta y activo, y su área. Dar de
 baja a alguien le quita el acceso al momento. El historial y las alertas guardan el correo de quien hizo cada cambio. La sesión vence
-a las 12 horas de abrir la liga.
+a las 12 horas de entrar.
 
 ## Nacional y Última Milla
 

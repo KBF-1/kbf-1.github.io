@@ -18,14 +18,17 @@ const ahora = () => new Date().toISOString();
 const lista = (snap) => snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
 /* ------------------------------------------------------------------ sesión
-   Se entra con el correo: Firebase manda una liga al buzón y con un clic queda la sesión (12 horas). El área de cada persona
-   vive en lc_usuarios/{correo} y la asigna el Administrador. El administrador principal está fijo en las reglas. */
+   Cada persona entra con su correo y su propia contraseña. La primera vez crea su contraseña y verifica su correo con un solo
+   mensaje (después ya no se mandan correos). El área de cada persona vive en lc_usuarios/{correo} y la asigna el Administrador;
+   el administrador principal está fijo en las reglas. Las reglas solo dan acceso a correos verificados. */
 let sesion = null; // { uid, correo, nombre, area }
 export const actual = () => sesion;
-const LLAVE_INICIO = 'lc-inicio-sesion', LLAVE_CORREO = 'lc-correo-liga';
+const LLAVE_INICIO = 'lc-inicio-sesion';
 const guardar = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* sin almacenamiento */ } };
 const leer = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
 export const correoNormal = (c) => String(c || '').trim().toLowerCase();
+const correoValido = (c) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(c);
+const regreso = () => ({ url: location.origin + location.pathname + (EMULADOR ? '?emu=1' : '') });
 
 export function vencida() {
   const t = Number(leer(LLAVE_INICIO) || 0);
@@ -38,12 +41,14 @@ async function areaDe(u) {
   if (!d.exists() || d.data().activo === false) return null;
   return { area: d.data().area, nombre: d.data().nombre || '' };
 }
+/* fn(sesion | null, aviso, pendiente) — pendiente = 'verificar' cuando falta confirmar el correo. */
 export function alCambiar(fn) {
   return fb.onAuthStateChanged(auth, async (u) => {
     if (!u) { sesion = null; fn(null); return; }
     const inicio = Date.parse((u.metadata && u.metadata.lastSignInTime) || '') || Number(leer(LLAVE_INICIO) || 0);
     if (inicio) guardar(LLAVE_INICIO, String(inicio));
     if (vencida()) { await salir(); fn(null, 'Tu sesión duró más de ' + CFG.sesionHoras + ' horas. Vuelve a entrar.'); return; }
+    if (!u.emailVerified) { sesion = null; fn(null, '', 'verificar', u.email); return; }
     try {
       const a = await areaDe(u);
       if (!a) { const c = u.email; await salir(); fn(null, 'El correo ' + c + ' no tiene un área asignada. Pide al administrador que te dé de alta.'); return; }
@@ -52,26 +57,38 @@ export function alCambiar(fn) {
     } catch (e) { await salir(); fn(null, amigable(e)); }
   });
 }
-/* Paso 1: manda la liga al correo. */
-export async function mandarLiga(correo) {
+export async function entrar(correo, clave) {
   correo = correoNormal(correo);
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) throw new Error('Escribe tu correo completo.');
-  await fb.sendSignInLinkToEmail(auth, correo, { url: location.origin + location.pathname + (EMULADOR ? '?emu=1' : ''), handleCodeInApp: true });
-  guardar(LLAVE_CORREO, correo);
-  return correo;
-}
-/* Paso 2: al abrir la liga. Devuelve 'sin-liga', 'falta-correo' (se abrió en otro equipo) o 'ok'. */
-export function esLiga() { return fb.isSignInWithEmailLink(auth, location.href); }
-export async function completarLiga(correoEscrito) {
-  if (!esLiga()) return 'sin-liga';
-  const correo = correoNormal(correoEscrito || leer(LLAVE_CORREO));
-  if (!correo) return 'falta-correo';
+  if (!correoValido(correo)) throw new Error('Escribe tu correo completo.');
   await fb.setPersistence(auth, fb.browserLocalPersistence);
   guardar(LLAVE_INICIO, String(Date.now()));
-  await fb.signInWithEmailLink(auth, correo, location.href);
-  guardar(LLAVE_CORREO, null);
-  history.replaceState(null, '', location.pathname + (EMULADOR ? '?emu=1' : '') + location.hash);
-  return 'ok';
+  await fb.signInWithEmailAndPassword(auth, correo, clave);
+}
+/* Primera vez: crea la cuenta y manda un solo correo para verificarla. */
+export async function crearCuenta(correo, clave) {
+  correo = correoNormal(correo);
+  if (!correoValido(correo)) throw new Error('Escribe tu correo completo.');
+  if (String(clave).length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
+  await fb.setPersistence(auth, fb.browserLocalPersistence);
+  guardar(LLAVE_INICIO, String(Date.now()));
+  const { user } = await fb.createUserWithEmailAndPassword(auth, correo, clave);
+  await fb.sendEmailVerification(user, regreso());
+}
+export async function reenviarVerificacion() { if (auth.currentUser) await fb.sendEmailVerification(auth.currentUser, regreso()); }
+/* Después de dar clic en la liga de verificación: recarga el usuario y su token (las reglas leen email_verified del token). */
+export async function yaVerifique() {
+  const u = auth.currentUser;
+  if (!u) return false;
+  await fb.reload(u);
+  if (!u.emailVerified) return false;
+  await fb.getIdToken(u, true);
+  location.reload();
+  return true;
+}
+export async function olvide(correo) {
+  correo = correoNormal(correo);
+  if (!correoValido(correo)) throw new Error('Escribe tu correo arriba y vuelve a dar clic en «Olvidé mi contraseña».');
+  await fb.sendPasswordResetEmail(auth, correo, regreso());
 }
 export async function salir() { guardar(LLAVE_INICIO, null); await fb.signOut(auth); }
 
@@ -238,9 +255,12 @@ export async function tokenGps() { try { return auth.currentUser ? await auth.cu
 
 export function amigable(e) {
   const c = (e && e.code) || '', m = String((e && e.message) || e || '');
-  if (/invalid-action-code|expired-action-code/.test(c)) return 'La liga ya se usó o venció. Pide una nueva.';
-  if (/invalid-email/.test(c)) return 'Ese correo no coincide con el de la liga.';
-  if (/operation-not-allowed/.test(c)) return 'Falta activar «Vínculo de correo electrónico» en Firebase › Authentication.';
+  if (/wrong-password|invalid-credential|user-not-found|invalid-login/.test(c)) return 'Correo o contraseña incorrectos. Si es tu primera vez, usa «Crear mi contraseña».';
+  if (/email-already-in-use/.test(c)) return 'Ese correo ya tiene contraseña. Entra con ella o usa «Olvidé mi contraseña».';
+  if (/weak-password/.test(c)) return 'La contraseña es muy débil: usa al menos 8 caracteres.';
+  if (/invalid-email/.test(c)) return 'Correo no válido.';
+  if (/quota-exceeded/.test(c)) return 'Firebase llegó a su límite diario de correos. Intenta mañana o avisa al administrador.';
+  if (/operation-not-allowed/.test(c)) return 'Falta activar «Correo electrónico/contraseña» en Firebase › Authentication.';
   if (/unauthorized-continue-uri|unauthorized-domain/.test(c)) return 'Falta agregar este sitio en Firebase › Authentication › Authorized domains.';
   if (/too-many-requests/.test(c)) return 'Demasiados intentos. Espera unos minutos.';
   if (/network|unavailable/.test(c)) return 'Sin conexión. Revisa tu internet y vuelve a intentar.';

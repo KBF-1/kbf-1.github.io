@@ -29,8 +29,9 @@ let sesion = null, temporizador = null;
 logos(document.getElementById('logos'));
 
 /* ================================================================== acceso */
-API.alCambiar(async (s, aviso) => {
+API.alCambiar(async (s, aviso, pendiente, correoPendiente) => {
   sesion = s;
+  if (pendiente === 'verificar') { pantallaVerificar(correoPendiente); return; }
   if (!s) { await pantallaAcceso(aviso); return; }
   pintarCuenta();
   irA(location.hash.slice(1));
@@ -41,45 +42,63 @@ setInterval(() => { if (sesion && API.vencida()) API.salir().then(() => toast('T
 
 async function pantallaAcceso(aviso) {
   nav.hidden = true; mount(cuenta);
-  // ¿Se abrió la liga que llegó al correo?
-  if (API.esLiga()) {
-    mount(main, h('div', { class: 'tarjeta acceso' }, h('p', { class: 'gris' }, 'Entrando…')));
-    try {
-      const r = await API.completarLiga();
-      if (r === 'ok') return; // onAuthStateChanged sigue
-      if (r === 'falta-correo') { confirmarCorreo(); return; }
-    } catch (e) { aviso = API.amigable(e); history.replaceState(null, '', location.pathname + location.search.replace(/[?&](apiKey|oobCode|mode|lang)=[^&]*/g, '')); }
-  }
   let guardado = '';
   try { guardado = localStorage.getItem('lc-ultimo-correo') || ''; } catch (e) { /* sin almacenamiento */ }
-  const correo = entrada({ type: 'email', autocomplete: 'email', required: true, id: 'correo', value: guardado, placeholder: 'nombre@cesantoni.com.mx' });
-  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Mandarme la liga');
-  const zona = h('div');
+  let modo = 'entrar';
+  const correo = entrada({ type: 'email', autocomplete: 'username', required: true, id: 'correo', value: guardado, placeholder: 'nombre@cesantoni.com.mx' });
+  const clave = entrada({ type: 'password', autocomplete: 'current-password', required: true, id: 'clave', minlength: 8 });
+  const clave2 = entrada({ type: 'password', autocomplete: 'new-password', id: 'clave2', minlength: 8 });
+  const campo2 = campo('Repite la contraseña', clave2);
+  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Entrar');
+  const titulo = h('p', { class: 'gris' });
+  const cambiar = h('button', { type: 'button', class: 'enlace' });
+  const olvideBtn = h('button', { type: 'button', class: 'enlace', onclick: async () => {
+    try { await API.olvide(correo.value); toast('Te mandamos un correo para cambiar tu contraseña. Revisa también Correo no deseado.'); } catch (x) { toast(API.amigable(x), true); }
+  } }, 'Olvidé mi contraseña');
+  const pintarModo = () => {
+    const nuevo = modo === 'crear';
+    campo2.hidden = !nuevo; clave2.required = nuevo;
+    clave.autocomplete = nuevo ? 'new-password' : 'current-password';
+    btn.textContent = nuevo ? 'Crear mi contraseña' : 'Entrar';
+    titulo.textContent = nuevo
+      ? 'Primera vez: escribe tu correo de trabajo y elige una contraseña (mínimo 8 caracteres). Te llegará un correo para confirmar que es tuyo.'
+      : 'Entra con tu correo de trabajo y tu contraseña. Tu área (Ventas, Operación o Transporte) se reconoce por tu correo. La sesión dura ' + CFG.sesionHoras + ' horas.';
+    cambiar.textContent = nuevo ? 'Ya tengo contraseña' : 'Primera vez: crear mi contraseña';
+    olvideBtn.hidden = nuevo;
+  };
+  cambiar.addEventListener('click', () => { modo = modo === 'crear' ? 'entrar' : 'crear'; pintarModo(); correo.focus(); });
   const form = h('form', { class: 'tarjeta acceso', onsubmit: async (e) => {
     e.preventDefault();
+    try { localStorage.setItem('lc-ultimo-correo', correo.value.trim().toLowerCase()); } catch (x) { /* sin almacenamiento */ }
     try {
-      const c = await ocupado(btn, () => API.mandarLiga(correo.value), 'Enviando…');
-      try { localStorage.setItem('lc-ultimo-correo', c); } catch (x) { /* sin almacenamiento */ }
-      mount(zona, h('div', { class: 'aviso ok-bg' }, h('b', null, 'Revisa tu correo (' + c + ').'), h('br'),
-        'Te llegó una liga de «noreply@proveedores-cesantoni.firebaseapp.com». Ábrela en esta misma computadora y entras directo. ',
-        'Si no la ves en unos minutos, busca en Correo no deseado o Cuarentena.'));
-    } catch (err) { toast(API.amigable(err), true); }
+      if (modo === 'crear') {
+        if (clave.value !== clave2.value) { toast('Las contraseñas no coinciden.', true); return; }
+        await ocupado(btn, () => API.crearCuenta(correo.value, clave.value), 'Creando…');
+      } else await ocupado(btn, () => API.entrar(correo.value, clave.value), 'Entrando…');
+    } catch (x) { toast(API.amigable(x), true); }
   } },
-  h('h1', null, 'Control de Embarques'),
-  h('p', { class: 'gris' }, 'Escribe tu correo de trabajo y te mandamos una liga para entrar, sin contraseña. Tu área (Ventas, Operación o Transporte) se asigna a tu correo. La sesión dura ' + CFG.sesionHoras + ' horas.'),
+  h('h1', null, 'Control de Embarques'), titulo,
   aviso ? h('p', { class: 'aviso mal' }, aviso) : null,
-  campo('Correo', correo), btn, zona,
+  campo('Correo', correo), campo('Contraseña', clave), campo2, btn,
+  h('p', { class: 'enlaces' }, cambiar, olvideBtn),
   h('p', { class: 'gris chico centro' }, h('a', { href: 'pantalla.html', target: '_blank', rel: 'noopener' }, 'Abrir la Pantalla del almacén'), ' (no pide acceso)'));
+  pintarModo();
   mount(main, form);
 }
-/* La liga se abrió en otro equipo o navegador: hay que confirmar el correo. */
-function confirmarCorreo() {
-  const correo = entrada({ type: 'email', autocomplete: 'email', required: true, id: 'correo' });
-  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Entrar');
-  mount(main, h('form', { class: 'tarjeta acceso', onsubmit: async (e) => {
-    e.preventDefault();
-    try { await ocupado(btn, () => API.completarLiga(correo.value), 'Entrando…'); } catch (err) { toast(API.amigable(err), true); }
-  } }, h('h1', null, 'Confirma tu correo'), h('p', { class: 'gris' }, 'Abriste la liga en otra computadora o navegador. Escribe el mismo correo al que llegó.'), campo('Correo', correo), btn));
+/* Cuenta creada pero el correo aún no se confirma. */
+function pantallaVerificar(correo) {
+  nav.hidden = true;
+  mount(cuenta, h('button', { class: 'btn chico', onclick: () => API.salir() }, 'Salir'));
+  const listo = h('button', { class: 'btn primario', type: 'button' }, 'Ya lo confirmé');
+  listo.addEventListener('click', async () => {
+    try { const ok = await ocupado(listo, () => API.yaVerifique(), 'Revisando…'); if (!ok) toast('Todavía no aparece confirmado. Da clic en la liga del correo y vuelve a intentar.', true); } catch (x) { toast(API.amigable(x), true); }
+  });
+  const reenviar = h('button', { class: 'btn', type: 'button' }, 'Reenviar correo');
+  reenviar.addEventListener('click', async () => { try { await ocupado(reenviar, () => API.reenviarVerificacion(), 'Enviando…'); toast('Correo reenviado.'); } catch (x) { toast(API.amigable(x), true); } });
+  mount(main, h('div', { class: 'tarjeta acceso' }, h('h1', null, 'Confirma tu correo'),
+    h('p', null, 'Te mandamos un correo a ', h('b', null, correo), ' para confirmar que es tuyo. Da clic en la liga que trae y luego aquí en «Ya lo confirmé».'),
+    h('p', { class: 'gris chico' }, 'Remitente: noreply@proveedores-cesantoni.firebaseapp.com. Si no llega en unos minutos, revisa Correo no deseado o Cuarentena. Esto solo se hace una vez.'),
+    h('div', { class: 'acciones' }, listo, reenviar)));
 }
 
 function pintarCuenta() {
