@@ -91,6 +91,7 @@ await page.getByRole('button', { name: 'Guardar catálogos' }).click();
 await esperarToast('Catálogos guardados');
 await page.locator('summary', { hasText: 'Tarifas por destino (4)' }).waitFor();
 check(true, 'importa transportistas, clientes y tarifas desde los Excel');
+check(await page.locator('td', { hasText: 'En Fletes: MARIA PERSONA FISICA' }).count() === 1, 'razón social de Fletes empatada por correo');
 // Transportista externo con su cuenta espejo
 await page.locator('tr', { hasText: 'FLETES DEL BAJIO S.A. DE C.V.' }).getByRole('button', { name: 'Editar' }).click();
 await page.getByLabel('Plataforma GPS').fill('Wialon');

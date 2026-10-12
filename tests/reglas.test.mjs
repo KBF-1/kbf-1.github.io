@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { combinarFolios, tipoUnidad, tarimas, idFolio, docsCompletos, revisarChecklist, excedeCapacidad, coordenadasDeLiga, esLigaCorta } from '../js/reglas.js';
 import { revisarPartida, EMBALAJES } from '../js/embalajes.js';
-import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara } from '../js/catalogos.js';
+import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara, unirTransportista } from '../js/catalogos.js';
 import { leerLibro, interpretar, combinar } from '../js/acopio.js';
 import { planear, km } from '../js/ruta.js';
 import { simulada } from '../js/gps.js';
@@ -163,6 +163,15 @@ test('Catálogos de Nacional (Seguimiento + Fletes)', async () => {
   assert.equal(r.transportistas.find((t) => t.nombre === 'Transportes Ejemplo').plazo_pago, 60);
   const saltillo = r.tarifas.find((t) => t.destino === 'SALTILLO');
   assert.deepEqual([saltillo.tarifa, saltillo.tarifa_fletes, saltillo.dias], [530, 560, 1]);
+  assert.equal(r.tarifas.find((t) => t.destino === 'LEON').tarifa, 260);          // se usa la Tarifa LP de Fletes
+  assert.equal(fb.razon_social_fletes, 'MARIA PERSONA FISICA');                    // empata por correo
+  assert.equal(r.transportistas.some((t) => t.nombre === 'MARIA PERSONA FISICA'), false);
+  // Unir a mano y que al reimportar se empate solo
+  const lista = [{ nombre: 'TRANSPORTES SOL' , telefono: '1' }, { nombre: 'PEDRO PERSONA', razon_social: 'PEDRO PERSONA', plazo_pago: 15 }];
+  const unida = unirTransportista(lista, 'PEDRO PERSONA', 'TRANSPORTES SOL');
+  assert.equal(unida.length, 1); assert.equal(unida[0].plazo_pago, 15);
+  const re = combinarCatalogos({ seguimiento: null, fletes: { transportistas: [{ razon_social: 'PEDRO PERSONA', plazo_pago: 20 }], destinos: [], clientes: [] }, actuales: { transportistas: unida } });
+  assert.equal(re.transportistas.length, 1); assert.equal(re.transportistas[0].plazo_pago, 20);
   assert.equal(r.clientes.find((c) => c.num === '9101').clasificacion, 'NACIONAL');
   assert.equal(r.clientes.find((c) => c.nombre === 'Showroom Polanco').clasificacion, 'SIN FLETE');
   assert.equal(tarifaPara(r.tarifas, ['Saltillo']).tarifa, 530);

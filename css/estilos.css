@@ -142,6 +142,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .desglose summary { cursor: pointer; font-weight: 600; color: var(--naranja-osc); padding: 4px 0; }
 .tabla.material td { vertical-align: top; }
 .tabla tr.alerta td { background: var(--rojo-bg); }
+.entrada.unir { width: auto; min-height: 32px; padding: 4px 8px; font-size: 13px; margin-top: 4px; }
 .sugerencia { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; background: var(--azul-bg); border-radius: 8px; padding: 10px 12px; margin: 10px 0; }
 .cliente-cat { background: #FBF9F6; border: 1px solid var(--linea); border-radius: 8px; padding: 12px; margin: 10px 0; }
 .espejo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }

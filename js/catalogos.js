@@ -3,7 +3,7 @@
    - «Fletes» (hoja CATALOGOS): tarifa y tarifa LP por destino, clasificación del cliente y datos de pago del transportista.
    Las columnas se buscan por su título, así que el orden puede cambiar. Nada de esto se guarda en el sitio (es público):
    se guarda en Firebase, en lc_config, que solo leen Transporte y Administrador. */
-import { norm } from './reglas.js?v=12';
+import { norm } from './reglas.js?v=13';
 
 const texto = (v) => { const t = String(v === undefined || v === null ? '' : v).replace(/\s+/g, ' ').trim(); return /^#(N\/A|VALUE!|REF!|DIV\/0!|NAME\?)$/i.test(t) ? '' : t; };
 const numero = (v) => { const t = String(v === undefined || v === null ? '' : v).replace(/[$,\s]/g, ''); if (!t) return null; const n = Number(t); return isNaN(n) ? null : n; };
@@ -71,13 +71,22 @@ export function combinarCatalogos({ seguimiento, fletes, actuales }) {
     porNombre.set(k, Object.assign({}, ya, Object.fromEntries(Object.entries(t).filter(([, v]) => v !== '' && v !== null))));
   });
   // La razón social de Fletes a veces viene sin «S.A. de C.V.» o con otro orden: se compara sin sufijos y por inicio.
-  const base = (x) => llave(String(x || '').replace(/\b(S\.?\s*A\.?|S\.?\s*DE\s*R\.?\s*L\.?|DE\s*C\.?\s*V\.?|S\.?\s*A\.?\s*P\.?\s*I\.?)\b/gi, ''));
+  const base = (x) => llave(String(x || '').replace(/\b(S\.?\s*A\.?|S\.?\s*DE\s*R\.?\s*L\.?|DE\s*C\.?\s*V\.?|S\.?\s*A\.?\s*P\.?\s*I\.?)\b/gi, '')
+    .replace(/^\s*(AUTO\s*TRANSPORTES|AUTOTRANSPORTES|TRANSPORTES|TRANSPORTE|AUTO\s*EXPRESS|AUTOEXPRESS)\s+(EL\s+|LA\s+|LOS\s+)?/i, ''));
   const igual = (a, b) => { a = base(a); b = base(b); return a.length > 3 && b.length > 3 && (a === b || a.startsWith(b) || b.startsWith(a)); };
   (fletes ? fletes.transportistas : []).forEach((f) => {
     const k = llave(f.razon_social);
-    const t = [...porNombre.values()].find((x) => igual(x.razon_social, f.razon_social) || igual(x.nombre, f.razon_social));
+    // Si la razón social no empata (persona física con otro nombre comercial), se busca por correo.
+    const correos = (x) => String(x || '').toLowerCase().match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/g) || [];
+    const deF = correos(f.correo);
+    const t = [...porNombre.values()].find((x) => (x.alias_fletes || []).some((a) => llave(a) === k))
+      || [...porNombre.values()].find((x) => igual(x.razon_social, f.razon_social) || igual(x.nombre, f.razon_social))
+      || (deF.length ? [...porNombre.values()].find((x) => correos([x.correo, x.correo2].join(' ')).some((c) => deF.includes(c))) : null);
     const extra = { plazo_pago: f.plazo_pago, iva: f.iva, correo_pagos: f.correo };
-    if (t) Object.assign(t, extra);
+    const mismaRazon = t && (igual(t.razon_social, f.razon_social) || igual(t.nombre, f.razon_social) || (t.alias_fletes || []).some((a) => llave(a) === k));
+    if (t && mismaRazon) Object.assign(t, extra, (t.alias_fletes || []).some((a) => llave(a) === k) ? { razon_social_fletes: f.razon_social } : {});
+    // Empatado por correo: solo completa lo que falte y anota con qué razón social viene en Fletes.
+    else if (t) Object.assign(t, Object.fromEntries(Object.entries(extra).filter(([c]) => t[c] === undefined || t[c] === null || t[c] === '')), { razon_social_fletes: f.razon_social });
     else porNombre.set(k, Object.assign({ nombre: f.razon_social, razon_social: f.razon_social }, extra));
   });
   const transportistas = [...porNombre.values()].filter((t) => t.nombre).sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -87,7 +96,9 @@ export function combinarCatalogos({ seguimiento, fletes, actuales }) {
   (seguimiento ? seguimiento.destinos : []).forEach((d) => destinos.set(norm(d.destino), Object.assign(destinos.get(norm(d.destino)) || {}, d)));
   (fletes ? fletes.destinos : []).forEach((d) => {
     const ya = destinos.get(norm(d.destino)) || { destino: d.destino };
-    destinos.set(norm(d.destino), Object.assign(ya, { tarifa_fletes: d.tarifa, tarifa_lp: d.tarifa_lp }, ya.tarifa === undefined || ya.tarifa === null ? { tarifa: d.tarifa_lp || d.tarifa } : {}));
+    // La tarifa que se usa es la «TARIFA LP» de Fletes; si no la trae, la del Seguimiento (o la «TARIFA» de Fletes).
+    const tarifa = d.tarifa_lp || (ya.tarifa !== undefined && ya.tarifa !== null ? ya.tarifa : d.tarifa);
+    destinos.set(norm(d.destino), Object.assign(ya, { tarifa_fletes: d.tarifa, tarifa_lp: d.tarifa_lp, tarifa }));
   });
   const tarifas = [...destinos.values()].sort((a, b) => a.destino.localeCompare(b.destino));
 
@@ -102,6 +113,16 @@ export function combinarCatalogos({ seguimiento, fletes, actuales }) {
     else clientes.set(k, Object.assign({}, c));
   });
   return { transportistas, tarifas, clientes: [...clientes.values()].sort((a, b) => a.nombre.localeCompare(b.nombre)) };
+}
+
+/* Une a mano un transportista que solo vino de Fletes (razón social) con su transportista del Seguimiento.
+   La razón social queda como alias para que al volver a importar se empate sola. */
+export function unirTransportista(lista, origen, destino) {
+  const o = lista.find((t) => t.nombre === origen), d = lista.find((t) => t.nombre === destino);
+  if (!o || !d || o === d) return lista;
+  Object.assign(d, { alias_fletes: [...new Set((d.alias_fletes || []).concat([o.razon_social || o.nombre]))], razon_social_fletes: o.razon_social || o.nombre },
+    Object.fromEntries(['plazo_pago', 'iva', 'correo_pagos', 'plataforma', 'url', 'usuario', 'clave', 'contacto'].filter((c) => (d[c] === undefined || d[c] === '' || d[c] === null) && o[c] !== undefined).map((c) => [c, o[c]])));
+  return lista.filter((t) => t !== o);
 }
 
 /* Tarifa por tonelada de un destino (o del más caro de varios). */

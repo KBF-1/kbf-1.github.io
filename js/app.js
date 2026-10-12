@@ -1,13 +1,13 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
-import * as API from './datos.js?v=12';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=12';
-import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=12';
-import { leerLibro, interpretar, combinar } from './acopio.js?v=12';
-import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara } from './catalogos.js?v=12';
-import { planear } from './ruta.js?v=12';
-import { ubicacion } from './gps.js?v=12';
-import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=12';
+import * as API from './datos.js?v=13';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=13';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=13';
+import { leerLibro, interpretar, combinar } from './acopio.js?v=13';
+import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara, unirTransportista } from './catalogos.js?v=13';
+import { planear } from './ruta.js?v=13';
+import { ubicacion } from './gps.js?v=13';
+import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=13';
 
 const CFG = window.LC_CONFIG;
 const main = document.getElementById('main'), nav = document.getElementById('nav'), cuenta = document.getElementById('cuenta');
@@ -768,7 +768,7 @@ async function seccionConsulta() {
   pintar();
   return h('section', { class: 'tarjeta' }, h('h2', null, 'Tarifas y clientes de Nacional'), h('div', { class: 'filtros' }, buscar),
     h('details', { class: 'desglose', open: true }, h('summary', null, 'Tarifas por destino (' + tarifas.length + ') · pesos por tonelada'),
-      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Destino', 'Estado', 'Tarifa/t', 'Tarifa en Fletes/t', 'Días'].map((x) => h('th', null, x)))), tT))),
+      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Destino', 'Estado', 'Tarifa LP/t', 'Tarifa (Fletes)/t', 'Días'].map((x) => h('th', null, x)))), tT))),
     h('details', { class: 'desglose' }, h('summary', null, 'Clientes (' + clientes.length + ')'),
       h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Núm.', 'Cliente', 'Customer Service', 'Zona', 'Clasificación', 'Cita'].map((x) => h('th', null, x)))), tC))));
 }
@@ -796,12 +796,18 @@ function seccionTransportistas(lista) {
   return h('section', { class: 'tarjeta' }, h('div', { class: 'cabecera' }, h('h2', null, 'Transportistas externos · cuentas espejo'), h('button', { class: 'btn primario', onclick: () => editar() }, '+ Transportista')),
     h('p', { class: 'gris chico' }, 'Para Nacional: la cuenta espejo es el acceso a la plataforma GPS del transportista. En Monitoreo y en el despacho aparece el botón para abrirla.'),
     h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Transportista', 'Teléfono · correo', 'Pago', 'Plataforma', 'Cuenta espejo', 'Usuario', 'Contacto', ''].map((x) => h('th', null, x)))),
-      h('tbody', null, lista.length ? lista.map((t) => h('tr', null, h('td', null, h('b', null, t.nombre), t.razon_social && t.razon_social !== t.nombre ? [h('br'), h('small', { class: 'gris' }, t.razon_social)] : null),
+      h('tbody', null, lista.length ? lista.map((t) => h('tr', null, h('td', null, h('b', null, t.nombre), t.razon_social && t.razon_social !== t.nombre ? [h('br'), h('small', { class: 'gris' }, t.razon_social)] : null,
+          t.razon_social_fletes ? [h('br'), h('small', { class: 'gris' }, 'En Fletes: ' + t.razon_social_fletes)] : null),
         h('td', { class: 'chico' }, [t.telefono, t.correo].filter(Boolean).join(' · ') || '—'),
         h('td', { class: 'chico' }, t.plazo_pago ? t.plazo_pago + ' días' + (t.iva ? ' · IVA ' + t.iva : '') : '—'), h('td', null, t.plataforma || '—'),
         h('td', null, t.url ? h('a', { href: t.url, target: '_blank', rel: 'noopener' }, 'Abrir ↗') : h('span', { class: 'gris' }, 'Sin liga')), h('td', null, t.usuario || '—'), h('td', null, t.contacto || '—'),
         h('td', null, h('button', { class: 'btn chico', onclick: () => editar(t) }, 'Editar'), ' ',
-          h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar a ' + t.nombre + '?')) { try { await guardarLista(lista.filter((x) => x !== t)); } catch (x) { err(x); } } } }, 'Borrar'))))
+          h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar a ' + t.nombre + '?')) { try { await guardarLista(lista.filter((x) => x !== t)); } catch (x) { err(x); } } } }, 'Borrar'),
+          // Vino solo de Fletes (razón social de una persona): se puede unir con su transportista.
+          t.razon_social === t.nombre && !t.telefono ? selector([['', 'Unir con…']].concat(lista.filter((x) => x !== t && x.telefono).map((x) => [x.nombre, x.nombre])), '', {
+            class: 'entrada unir', 'aria-label': 'Unir ' + t.nombre + ' con',
+            onchange: async (e) => { const destino = e.target.value; if (!destino || !confirm('¿' + t.nombre + ' es la razón social de ' + destino + '? Se unen y al volver a importar se empatan solos.')) { e.target.value = ''; return; }
+              try { await guardarLista(unirTransportista(lista.map((x) => Object.assign({}, x)), t.nombre, destino)); toast(t.nombre + ' unido con ' + destino + '.'); } catch (x) { err(x); } } }) : null)))
         : h('tr', null, h('td', { colspan: 8, class: 'gris centro' }, 'Sin transportistas.'))))));
 }
 /* Tarifa por tonelada del destino (catálogo importado) × toneladas del folio. */
@@ -813,7 +819,7 @@ function sugerenciaTarifa(f, cat, campoTarifa) {
     h('div', null, h('b', null, 'Tarifa ' + t.destino + ': ' + pesos(t.tarifa) + ' por tonelada'), t.dias ? ' · ' + t.dias + (t.dias === 1 ? ' día' : ' días') + ' de tránsito' : '',
       f.paradas && f.paradas.length > 1 ? h('span', { class: 'gris chico' }, ' (varias paradas: se toma el destino más caro)') : null,
       h('br'), h('span', { class: 'gris chico' }, ton.toFixed(2) + ' t × ' + pesos(t.tarifa) + ' = ', h('b', null, pesos(total)),
-        t.tarifa_fletes && t.tarifa_fletes !== t.tarifa ? ' · en Fletes: ' + pesos(t.tarifa_fletes) + '/t' : '')),
+        t.tarifa_lp && t.tarifa_lp === t.tarifa ? ' · Tarifa LP' : '')),
     campoTarifa && total ? h('button', { type: 'button', class: 'btn chico', onclick: () => { campoTarifa.disabled = false; campoTarifa.value = total; } }, 'Usar ' + pesos(total)) : null);
 }
 /* Datos del cliente (catálogo importado): customer service, cita, zona, clasificación. */

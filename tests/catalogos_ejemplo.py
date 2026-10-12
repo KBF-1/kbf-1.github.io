@@ -25,6 +25,7 @@ for col, t in {'B': 'DESTINO', 'C': 'TARIFA', 'D': 'TARIFA LP', 'G': 'NUM CLIENT
 for i, f in enumerate([
   {'B': 'SALTILLO', 'C': 560, 'D': 530, 'G': 9101, 'H': 'INTERCERAMIC NORTE', 'I': 'NACIONAL', 'K': 'FLETES DEL BAJIO', 'L': 30, 'M': 'pagos@fletes.example', 'N': 1.12},
   {'B': 'MONTERREY', 'C': 600, 'D': 600, 'G': 9103, 'H': 'SHOWROOM POLANCO', 'I': 'SIN FLETE', 'K': 'JUAN EJEMPLO PEREZ', 'L': 60, 'N': 1.12},
+  {'B': 'LEON', 'C': 300, 'D': 260, 'K': 'MARIA PERSONA FISICA', 'L': 45, 'M': 'trafico@fletes.example', 'N': 1.12},
 ]):
     for col, v in f.items(): d[col + str(11 + i)] = v
 fl.save(sys.argv[2])

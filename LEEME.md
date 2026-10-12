@@ -66,7 +66,7 @@ En **Catálogos › Importar catálogos de Nacional** se suben los Excel de Log�
 
 Se guardan en Firebase (`lc_config/transportistas`, `tarifas`, `clientes`), no en este repositorio público. Las cuentas espejo
 capturadas a mano se conservan al volver a importar. En el despacho Nacional se sugiere la tarifa: **tarifa por tonelada del destino ×
-toneladas del folio** (con varias paradas, la del destino más caro) y se muestran los datos del cliente (aviso si pide cita o es Sin flete).
+toneladas del folio** (con varias paradas, la del destino más caro). La tarifa que se usa es la «TARIFA LP» de Fletes; las razones sociales de Fletes se empatan por nombre, por correo o a mano («Unir con…») y se muestran los datos del cliente (aviso si pide cita o es Sin flete).
 
 ## Flujo de un folio
 
