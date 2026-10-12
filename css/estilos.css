@@ -106,7 +106,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pestanas button.activa { background: var(--tinta); color: #fff; border-color: var(--tinta); }
 
 /* tablas */
-.filtros { margin-bottom: 10px; max-width: 360px; }
+.filtros { margin-bottom: 10px; }
 .tabla-scroll { overflow-x: auto; }
 .tabla { width: 100%; border-collapse: collapse; font-size: 14px; }
 .tabla th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--gris); padding: 8px 10px; border-bottom: 1px solid var(--linea); white-space: nowrap; }
@@ -118,6 +118,24 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tabla.compacta td { padding: 6px 8px; }
 .tabla.compacta .entrada { min-height: 34px; padding: 5px 8px; min-width: 120px; }
 .coords { display: grid; gap: 6px; }
+.segmento { display: inline-flex; border: 1px solid var(--linea); border-radius: 99px; overflow: hidden; margin-right: 10px; flex: none; }
+.segmento button { border: 0; background: var(--blanco); padding: 7px 14px; font-weight: 600; font-size: 13px; cursor: pointer; }
+.segmento button + button { border-left: 1px solid var(--linea); }
+.segmento button.activa { background: var(--tinta); color: #fff; }
+.filtros { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: none; }
+.filtros .entrada { max-width: 360px; }
+.envio { font-size: 11px; font-weight: 800; letter-spacing: .04em; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+.envio.nac { background: var(--azul-bg); color: var(--azul); }
+.envio.um { background: var(--naranja-claro); color: var(--naranja-osc); }
+.entrega { background: #FBF9F6; border: 1px solid var(--linea); border-radius: 8px; padding: 12px; margin: 6px 0; }
+.marcas { display: flex; gap: 6px; flex-wrap: wrap; }
+.desglose { margin-top: 8px; }
+.desglose summary { cursor: pointer; font-weight: 600; color: var(--naranja-osc); padding: 4px 0; }
+.tabla.material td { vertical-align: top; }
+.tabla tr.alerta td { background: var(--rojo-bg); }
+.ok { color: var(--verde); font-weight: 600; }
+.ubicacion { display: grid; gap: 4px; min-width: 260px; }
+.fila-ub { display: flex; gap: 6px; }
 .coord small { display: block; font-size: 12px; color: var(--gris); }
 .tabla tr.detalle td { border-top: 0; padding-top: 0; }
 .paradas-t { margin-top: 4px; background: #FBF9F6; }

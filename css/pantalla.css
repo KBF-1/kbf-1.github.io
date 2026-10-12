@@ -19,6 +19,8 @@ html, body { margin: 0; height: 100%; background: var(--fondo); color: var(--tex
 .folio, .cita, .anden, .docs { font-family: "JetBrains Mono", monospace; font-weight: 700; }
 .folio { color: var(--amarillo); }
 .cliente { font-weight: 600; }
+.tipo { font: 700 .7em "Montserrat", Arial, sans-serif; letter-spacing: .08em; }
+.tipo.nac { color: var(--gris); } .tipo.um { color: var(--naranja); }
 .anden { text-align: center; }
 .docs.d3 { color: var(--verde); } .docs.d1, .docs.d2 { color: var(--amarillo); } .docs.d0 { color: var(--rojo); }
 .est { font: 700 .85em "Montserrat", Arial, sans-serif; letter-spacing: .06em; }
@@ -38,6 +40,6 @@ tr.c-rojo td { background: rgba(240,71,58,.10) !important; }
 .pagina { margin-left: auto; font-weight: 700; color: var(--texto); }
 @media (max-width: 800px) {
   html, body { overflow: auto; }
-  .tablero th:nth-child(4), .tablero td:nth-child(4), .tablero th:nth-child(5), .tablero td:nth-child(5) { display: none; }
+  .tablero th:nth-child(5), .tablero td:nth-child(5), .tablero th:nth-child(6), .tablero td:nth-child(6) { display: none; }
   .cab { padding: 12px 16px; } .pie { position: static; padding: 12px 16px; }
 }

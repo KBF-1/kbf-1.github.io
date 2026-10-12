@@ -1,7 +1,8 @@
-/* Pantalla del almacén: tablero tipo aeropuerto, sin contraseña. Solo lee lc_folios (no hay tarifas, operador ni placas ahí).
+/* Pantalla del almacén: tablero tipo aeropuerto, sin contraseña. Solo lee lc_pantalla, la copia pública de cada folio
+   (sin tarifas, operador, placas, material, direcciones ni nombres de clientes de Última Milla).
    Se refresca cada 30 segundos y pasa de página sola si no caben todos los folios. */
 import * as fb from './firebase-sdk.js';
-import { ESTATUS, docsAvance } from './reglas.js';
+import { ESTATUS } from './reglas.js';
 
 const CFG = window.LC_CONFIG;
 const app = fb.initializeApp(CFG.firebase, 'pantalla');
@@ -24,7 +25,7 @@ function hora(v) {
 
 async function cargar() {
   try {
-    const snap = await fb.getDocs(fb.collection(db, 'lc_folios'));
+    const snap = await fb.getDocs(fb.collection(db, 'lc_pantalla'));
     const hace24 = Date.now() - 86400000;
     folios = snap.docs.map((d) => d.data())
       .filter((f) => f.estatus !== 'ENTREGADO' || Date.parse(f.entregado || f.actualizado || 0) > hace24)
@@ -47,15 +48,15 @@ function pintar() {
   const vis = folios.slice(pag * n, pag * n + n);
   cuerpo.replaceChildren();
   if (!vis.length) {
-    const tr = document.createElement('tr'), c = td('Sin folios activos', 'vacio'); c.colSpan = 9; tr.appendChild(c); cuerpo.appendChild(tr);
+    const tr = document.createElement('tr'), c = td('Sin folios activos', 'vacio'); c.colSpan = 10; tr.appendChild(c); cuerpo.appendChild(tr);
   }
   vis.forEach((f) => {
     const e = ESTATUS[f.estatus] || { nombre: f.estatus, color: 'gris' };
     const tr = document.createElement('tr');
     tr.className = 'c-' + e.color;
     const sem = document.createElement('td'); sem.className = 'sem'; const luz = document.createElement('span'); luz.className = 'luz ' + e.color; luz.setAttribute('aria-hidden', 'true'); sem.appendChild(luz);
-    const n3 = docsAvance(f.docs);
-    tr.append(sem, td(f.folio, 'folio'), td(f.cliente + (f.destino ? ' · ' + f.destino : ''), 'cliente'), td(f.transportista || '—'),
+    const n3 = Number(f.docs) || 0;
+    tr.append(sem, td(f.folio, 'folio'), td(f.tipo_envio === 'ULTIMA_MILLA' ? 'ÚLT. MILLA' : 'NACIONAL', 'tipo ' + (f.tipo_envio === 'ULTIMA_MILLA' ? 'um' : 'nac')), td(f.cliente + (f.destino ? ' · ' + f.destino : ''), 'cliente'), td(f.transportista || '—'),
       td(f.tipo_unidad || '—'), td(hora(f.cita), 'cita'), td(f.anden || '—', 'anden'), td(n3 + '/3', 'docs d' + n3), td(e.nombre.toUpperCase(), 'est ' + e.color));
     cuerpo.appendChild(tr);
   });

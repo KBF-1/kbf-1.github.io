@@ -1,7 +1,7 @@
 /* Formato de Acopio (.xlsx / .xlsm): lee las hojas Base, CB360 y Exhibición sin librerías, separa por cliente y destino,
    y calcula tarimas, resto de tarima y peso. Los títulos de columna se buscan por nombre (no por posición), así que el
    formato puede mover columnas. Todo lo calculado se muestra antes de crear los folios para corregirlo a mano. */
-import { combinarFolios, tarimas, tipoUnidad, redondeo, norm } from './reglas.js';
+import { combinarFolios, tarimas, tipoUnidad, redondeo, norm, coordenadasDeLiga } from './reglas.js';
 
 export const HOJAS = [['BASE', 'Base'], ['CB360', 'CB360'], ['EXHIBICION', 'Exhibición']];
 
@@ -50,6 +50,7 @@ function filasDe(xml, compartidos) {
     const v = (c.match(/<v>([\s\S]*?)<\/v>/) || [])[1], inline = (c.match(/<is>[\s\S]*?<\/is>/) || [])[0];
     let val = t === 's' ? compartidos[Number(v)] : inline ? desc(inline.replace(/<[^>]+>/g, '')) : v === undefined ? '' : desc(v);
     if ((t === undefined || t === 'n') && val !== '' && !isNaN(Number(val))) val = Number(val);
+    if (t === 'b') val = v === '1';
     const f = Number(num) - 1;
     (filas[f] = filas[f] || [])[colNum(letras)] = val;
   });
@@ -174,7 +175,7 @@ function interpretarCesantoni(hojas) {
   if (!folio) avisos.push('No se encontró el número de folio (celda junto a «Folio:» en la hoja Base). Escríbelo a mano.');
   const t = filaTitulos(base, ['DESTINO ENVIO', 'KG.', 'TARIMAS']), m = t.m;
   const g = (f, k) => (m[k] === undefined ? '' : f[m[k]]);
-  const paradas = new Map(), clientes = new Set(), pedidos = new Set();
+  const paradas = new Map(), clientes = new Set(), pedidos = new Set(), material = [];
   let partidas = 0;
   for (let i = t.fila + 1; i < base.length; i++) {
     const f = base[i] || [];
@@ -190,6 +191,11 @@ function interpretarCesantoni(hojas) {
         tarimas: 0, restos_liso: 0, restos_deco: 0, peso_kg: 0, m2: 0, partidas: 0 });
     }
     const p = paradas.get(codigo);
+    const prod = texto(g(f, 'PRODUCTO')) || [texto(g(f, 'DESCRIPCION 1')), texto(g(f, 'LINEA DESCRIPCION 2'))].filter(Boolean).join(' ');
+    material.push({ destino: codigo, orden: texto(g(f, 'NUMERO ORDEN')), sku: texto(g(f, '2º Nº ARTICULO')) || texto(g(f, '2O NO ARTICULO')), producto: prod,
+      formato: texto(g(f, 'FORMATO')), cantidad: num(g(f, 'CANT ENVIADA')) || num(g(f, 'CANTIDAD ENVIADA')), um: texto(g(f, 'UM')),
+      tarimas: num(g(f, 'TARIMAS')), restos: num(g(f, 'RESTOS TARIMA - LISO')) + num(g(f, 'RESTOS TARIMA - DECO')), kg: redondeo(kgs, 2), m2: redondeo(num(g(f, 'MTS')), 2),
+      lote: texto(g(f, 'Nº LOTE /SERIE')), oc: texto(g(f, 'OC CLIENTE')) });
     p.tarimas += num(g(f, 'TARIMAS')); p.restos_liso += num(g(f, 'RESTOS TARIMA - LISO')); p.restos_deco += num(g(f, 'RESTOS TARIMA - DECO'));
     p.peso_kg += kgs; p.m2 += num(g(f, 'MTS')); p.partidas++;
   }
@@ -221,7 +227,7 @@ function interpretarCesantoni(hojas) {
     folio: combinarFolios([folio]) || '', cliente: [...clientes].join(' / '), destino: [...new Set(lista.map((p) => p.ciudad))].join(' / '),
     hojas: (lista.length ? ['Base'] : []).concat(hojas2), clasificacion, pedidos: [...pedidos],
     tarimas: redondeo(tarimasTot, 2), resto: restos, peso_kg: peso, tipo_unidad: tipoUnidad(peso), renglones: partidas,
-    paradas: lista, extra
+    paradas: lista, extra, material, tipo_envio: 'NACIONAL'
   };
   return { grupos: lista.length || folio ? [grupo] : [], avisos };
 }
@@ -239,13 +245,66 @@ export function combinar(grupos) {
     folio: combinarFolios(grupos.map((g) => g.folio)), cliente: uni('cliente'), destino: uni('destino'),
     hojas: [...new Set(grupos.flatMap((g) => g.hojas || []))], clasificacion: uni('clasificacion'),
     tarimas: redondeo(grupos.reduce((s, g) => s + (Number(g.tarimas) || 0), 0), 2), resto: grupos.reduce((s, g) => s + (Number(g.resto) || 0), 0),
-    peso_kg: peso, tipo_unidad: tipoUnidad(peso), renglones: grupos.reduce((s, g) => s + (g.renglones || 0), 0), paradas
+    peso_kg: peso, tipo_unidad: tipoUnidad(peso), renglones: grupos.reduce((s, g) => s + (g.renglones || 0), 0), paradas,
+    material: grupos.flatMap((g) => g.material || []), tipo_envio: grupos[0].tipo_envio || 'NACIONAL'
   };
+}
+
+/* ---------------------------------------------------------------- Cuadro de Envío (Última Milla)
+   Una hoja con etiquetas («NO. DE FOLIO», «CALLE», «LINK DE GOOGLE MAPS»…) y el valor a su derecha. Las casillas
+   (descarga manual, gran formato…) llegan como verdadero/falso. */
+const ETIQUETAS_CUADRO = ['NO. DE FOLIO', 'NO. DE EMBARQUE', 'PAGO DE FLETE DIRECTO', 'NO. DE ORDEN', 'NO. DE FACTURA', 'GRAN FORMATO', 'NOMBRE DEL CLIENTE',
+  'NOMBRE DE QUIEN RECIBE', 'TELEFONO PRINCIPAL', 'TELEFONO SECUNDARIO', 'CALLE', 'COLONIA', 'NO. INTERIOR', 'NO. EXTERIOR', 'CP', 'LOCALIDAD', 'MUNICIPIO',
+  'LINK DE GOOGLE MAPS', 'OBSERVACIONES', 'TIPO DE DESCARGA', 'DESCARGA MANUAL', 'DESCARGA MONTACARGAS', 'DETALLES DE ENVIO', 'PESO (KG)', 'METROS', 'ADHESIVOS',
+  'MATERIAL ALMACEN DISTINTO AL 2100', 'CUADRO DE ENVIO'];
+export function esCuadroEnvio(hojas) { return !!hojaPor(hojas, 'CUADRODEENVIO'); }
+function camposCuadro(filas) {
+  const out = {};
+  filas.forEach((f) => {
+    (f || []).forEach((v, c) => {
+      const k = norm(v).replace(/:$/, '');
+      if (!ETIQUETAS_CUADRO.includes(k) || out[k] !== undefined) return;
+      let val = '';
+      for (let d = c + 1; d < f.length; d++) {
+        if (f[d] === undefined || f[d] === null || f[d] === '') continue;
+        if (ETIQUETAS_CUADRO.includes(norm(f[d]).replace(/:$/, ''))) break; // siguiente etiqueta: el campo quedó vacío
+        val = f[d]; break;
+      }
+      out[k] = val;
+    });
+  });
+  return out;
+}
+const si = (v) => v === true || v === 1 || /^(1|SI|SÍ|X|TRUE|VERDADERO)$/i.test(String(v).trim());
+function interpretarCuadro(hojas) {
+  const avisos = [], c = camposCuadro(hojas[hojaPor(hojas, 'CUADRODEENVIO')]);
+  const folio = texto(c['NO. DE FOLIO']);
+  if (!folio) avisos.push('No se encontró el número de folio (NO. DE FOLIO). Escríbelo a mano.');
+  const maps = texto(c['LINK DE GOOGLE MAPS']), pos = coordenadasDeLiga(maps);
+  const peso = redondeo(num(c['PESO (KG)']), 2);
+  if (!peso) avisos.push('El cuadro no trae PESO (KG).');
+  const descarga = si(c['DESCARGA MONTACARGAS']) ? 'MONTACARGAS' : si(c['DESCARGA MANUAL']) ? 'MANUAL' : '';
+  const entrega = {
+    recibe: texto(c['NOMBRE DE QUIEN RECIBE']), telefono: texto(c['TELEFONO PRINCIPAL']), telefono2: texto(c['TELEFONO SECUNDARIO']),
+    calle: texto(c.CALLE), no_ext: texto(c['NO. EXTERIOR']), no_int: texto(c['NO. INTERIOR']), colonia: texto(c.COLONIA), cp: texto(c.CP),
+    localidad: texto(c.LOCALIDAD), municipio: texto(c.MUNICIPIO), maps, observaciones: texto(c.OBSERVACIONES), descarga,
+    embarque: texto(c['NO. DE EMBARQUE']), orden: texto(c['NO. DE ORDEN']), factura: texto(c['NO. DE FACTURA']),
+    flete_directo: si(c['PAGO DE FLETE DIRECTO']), gran_formato: si(c['GRAN FORMATO']), adhesivos: si(c.ADHESIVOS),
+    almacen_distinto: si(c['MATERIAL ALMACEN DISTINTO AL 2100'])
+  };
+  const lugar = entrega.localidad || entrega.municipio;
+  return { avisos, grupos: [{
+    tipo_envio: 'ULTIMA_MILLA', folio: combinarFolios([folio]) || '', cliente: texto(c['NOMBRE DEL CLIENTE']),
+    destino: [lugar, entrega.municipio && entrega.municipio !== lugar ? entrega.municipio : ''].filter(Boolean).join(', '),
+    hojas: ['Cuadro de Envío'], tarimas: 0, resto: 0, peso_kg: peso, m2: redondeo(num(c.METROS), 2), tipo_unidad: tipoUnidad(peso),
+    entrega, lat: pos ? pos.lat : null, lng: pos ? pos.lng : null, renglones: 1
+  }] };
 }
 
 /* Libro → { grupos: [...], avisos: [...] }. Con el Formato de Acopio CESANTONI sale un grupo (el folio del archivo);
    con otros formatos, un grupo por cliente + destino. */
 export function interpretar(hojas) {
+  if (esCuadroEnvio(hojas)) return interpretarCuadro(hojas);
   if (esFormatoCesantoni(hojas)) return interpretarCesantoni(hojas);
   const avisos = [], renglones = [];
   const nombres = Object.keys(hojas);

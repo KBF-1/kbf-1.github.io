@@ -93,10 +93,5 @@ export function mapaEn(L, contenedor, centro) {
   L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(m);
   return m;
 }
-/* «20.67, -103.35» (copiado de Google Maps) → { lat, lng } */
-export function leerCoordenadas(t) {
-  const m = String(t || '').match(/(-?\d{1,2}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)/);
-  if (!m) return null;
-  const lat = Number(m[1]), lng = Number(m[2]);
-  return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
-}
+/* «20.67, -103.35» o una liga larga de Google Maps → { lat, lng } (ver coordenadasDeLiga en reglas.js). */
+export { coordenadasDeLiga as leerCoordenadas } from './reglas.js';

@@ -34,6 +34,23 @@ protege. La tarifa negociada, el operador, las placas y el checklist están en `
 Pantalla solo lee `lc_folios`, donde no hay nada de eso. La sesión vence a las 12 horas de escribir la contraseña (lo revisan las reglas,
 no solo la página).
 
+## Nacional y Última Milla
+
+| | Nacional | Última Milla |
+|---|---|---|
+| Archivo | Formato de Acopio (macro) | Cuadro de Envío |
+| Va a | Bodegas, sucursales y obras | Domicilio del cliente |
+| Se guarda | Destinos de envío y **material partida por partida** (producto, SKU, lote, OC, cantidad, tarimas, restos, kg, m²) | Dirección, quién recibe, teléfonos, liga de Google Maps, descarga, observaciones, peso y metros |
+| Ubicación | Catálogos › Destinos Nacionales (liga de Maps o lat, lng) | Del Cuadro de Envío; si la liga es corta, se abre y se pega la liga larga |
+| Ruta | — | Última Milla (orden de entregas) |
+
+Cada partida del acopio se revisa contra **Pesos, Embalajes y Estibas (AN-GCT-13 Rev. 16)** y el embalaje de adhesivos
+(`js/embalajes-datos.js`): formato, cajas por tarima, tarima, altura, estiba y rango de kilos esperado; marca las partidas fuera de rango.
+Para una revisión nueva del documento se reemplazan las listas de ese archivo.
+
+La Pantalla lee `lc_pantalla`, una copia pública de cada folio sin material, direcciones, teléfonos, tarifas ni nombres de clientes
+de Última Milla. `lc_folios` ya solo lo leen las áreas con sesión.
+
 ## Flujo de un folio
 
 1. **Ventas** sube uno o varios Formatos de Acopio (macro de CESANTONI). Cada archivo es un folio (celda «Folio:» de Base) con su clasificación y sus destinos de envío (sucursal, ciudad, tarimas, restos en cajas, kilos); CB360 y Exhibición suman su peso. Folios que van en la misma unidad se juntan con «Juntar marcados». Otros formatos: las columnas se reconocen por su
@@ -59,7 +76,7 @@ Mientras tanto, todo el Monitoreo funciona con datos simulados.
 
 ## Colecciones
 
-`lc_folios` (+ `historial`), `lc_despachos`, `lc_unidades`, `lc_destinos`, `lc_rutas`, `lc_alertas`, `lc_areas`, `lc_config`
+`lc_folios` (+ `historial`), `lc_pantalla`, `lc_despachos`, `lc_unidades`, `lc_destinos`, `lc_rutas`, `lc_alertas`, `lc_areas`, `lc_config`
 (`inicio`, `general` = origen, `gps` = puente).
 
 ## Pruebas

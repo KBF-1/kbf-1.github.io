@@ -12,10 +12,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Montserrat:wght@600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
   <script>/* Si hay una versión nueva publicada, recarga una vez (la pantalla se queda abierta todo el día). */
-    (function () { var V = '3'; setInterval(chk, 600000); chk(); function chk() { try { fetch('version.txt?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
+    (function () { var V = '4'; setInterval(chk, 600000); chk(); function chk() { try { fetch('version.txt?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
       t = String(t || '').trim(); if (!t || t === V || sessionStorage.getItem('recarga-' + t)) return;
       sessionStorage.setItem('recarga-' + t, '1'); var u = new URL(location.href); u.searchParams.set('_v', t); location.replace(u.href); }).catch(function () {}); } catch (e) {} } })();</script>
-  <link rel="stylesheet" href="css/pantalla.css?v=3">
+  <link rel="stylesheet" href="css/pantalla.css?v=4">
 </head>
 <body>
   <header class="cab">
@@ -24,7 +24,7 @@
     <div class="der"><div id="reloj" class="reloj">--:--:--</div><div id="estado" class="estado">Cargando…</div></div>
   </header>
   <table class="tablero">
-    <thead><tr><th class="sem"></th><th>Folio</th><th>Cliente · Destino</th><th>Transportista</th><th>Unidad</th><th>Cita</th><th>Andén</th><th>Docs</th><th>Estatus</th></tr></thead>
+    <thead><tr><th class="sem"></th><th>Folio</th><th>Envío</th><th>Cliente · Destino</th><th>Transportista</th><th>Unidad</th><th>Cita</th><th>Andén</th><th>Docs</th><th>Estatus</th></tr></thead>
     <tbody id="filas"></tbody>
   </table>
   <footer class="pie">
@@ -34,7 +34,7 @@
     <span><i class="luz rojo"></i> Parado / Incompleto</span>
     <span id="pagina" class="pagina"></span>
   </footer>
-  <script src="js/config.js?v=3"></script>
-  <script type="module" src="js/pantalla.js?v=3"></script>
+  <script src="js/config.js?v=4"></script>
+  <script type="module" src="js/pantalla.js?v=4"></script>
 </body>
 </html>

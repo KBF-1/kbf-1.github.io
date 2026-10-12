@@ -2,7 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { combinarFolios, tipoUnidad, tarimas, idFolio, docsCompletos, revisarChecklist, excedeCapacidad } from '../js/reglas.js';
+import { combinarFolios, tipoUnidad, tarimas, idFolio, docsCompletos, revisarChecklist, excedeCapacidad, coordenadasDeLiga, esLigaCorta } from '../js/reglas.js';
+import { revisarPartida, EMBALAJES } from '../js/embalajes.js';
 import { leerLibro, interpretar, combinar } from '../js/acopio.js';
 import { planear, km } from '../js/ruta.js';
 import { simulada } from '../js/gps.js';
@@ -98,6 +99,8 @@ test('Formato de Acopio CESANTONI: un folio por archivo, por destino de envío',
   assert.equal(g.resto, 5);
   assert.equal(g.tipo_unidad, 'FULL');
   assert.deepEqual(g.hojas, ['Base', 'Exhibición']);
+  assert.equal(g.material.length, 3);
+  assert.equal(g.material[2].producto !== undefined, true);
   // Dos acopios en la misma unidad
   const g2 = (await leer('./acopio-cesantoni-2.xlsm')).grupos[0];
   const c = combinar([g, g2]);
@@ -105,4 +108,44 @@ test('Formato de Acopio CESANTONI: un folio por archivo, por destino de envío',
   assert.equal(c.peso_kg, 83000);
   assert.equal(c.paradas.length, 2);
   assert.equal(c.paradas[0].tarimas, 26);
+});
+test('Cuadro de Envío (Última Milla)', async () => {
+  const leer = async (n) => interpretar(await leerLibro(new Uint8Array(readFileSync(new URL(n, import.meta.url)))));
+  const r = await leer('./cuadro-envio.xlsm');
+  assert.deepEqual(r.avisos, []);
+  const g = r.grupos[0];
+  assert.equal(g.tipo_envio, 'ULTIMA_MILLA');
+  assert.equal(g.folio, '9001');
+  assert.equal(g.cliente, 'CLIENTE DE PRUEBA');
+  assert.equal(g.destino, 'ZACATECAS');
+  assert.equal(g.peso_kg, 615.56);
+  assert.equal(g.m2, 36.96);
+  assert.equal(g.entrega.descarga, 'MANUAL');
+  assert.equal(g.entrega.no_ext, '10');
+  assert.equal(g.entrega.no_int, '');          // vacío: no toma la etiqueta de al lado
+  assert.equal(g.entrega.telefono2, '');
+  assert.equal(g.entrega.gran_formato, false);
+  assert.equal(g.lat, null);                    // liga corta: sin coordenadas
+  const g2 = (await leer('./cuadro-envio-2.xlsm')).grupos[0];
+  assert.deepEqual([g2.lat, g2.lng], [22.7472, -102.5182]);
+});
+test('Ligas de Google Maps', () => {
+  assert.deepEqual(coordenadasDeLiga('https://www.google.com/maps/place/X/@22.6489,-102.9913,15z/data=!3d22.6478!4d-102.9902'), { lat: 22.6478, lng: -102.9902 });
+  assert.deepEqual(coordenadasDeLiga('https://www.google.com/maps/@19.4326,-99.1332,14z'), { lat: 19.4326, lng: -99.1332 });
+  assert.deepEqual(coordenadasDeLiga('https://maps.google.com/?q=22.64,-102.99'), { lat: 22.64, lng: -102.99 });
+  assert.deepEqual(coordenadasDeLiga('20.67, -103.35'), { lat: 20.67, lng: -103.35 });
+  assert.equal(coordenadasDeLiga('https://maps.app.goo.gl/TtiYoWf2PJQ1jwN49'), null);
+  assert.equal(esLigaCorta('https://maps.app.goo.gl/TtiYoWf2PJQ1jwN49'), true);
+});
+test('Pesos y embalajes: formato por descripción y rango de kilos', () => {
+  const r1 = revisarPartida({ producto: 'EMILIA MATE BONE CE 30*60 PRC RECT 1.44 MT2/48 CJ-TAR 20', cantidad: 336, um: 'CJ', kg: 10516.8 });
+  assert.equal(r1.embalaje.formato, '30*60 RECT PRC');
+  assert.equal(r1.tarimas_calc, 7);
+  assert.equal(r1.fuera_de_rango, false);
+  const r2 = revisarPartida({ producto: 'EMILIA MATE BONE CE 30*30 MALL A PRC RECT 0.527 MT2/90 CJ 026', cantidad: 3, um: 'CJ', kg: 34.68 });
+  assert.equal(r2.embalaje.formato, '32.5*29.5 MALLA');
+  assert.equal(r2.restos_calc, 3);
+  assert.equal(revisarPartida({ producto: 'HARLOW CE 20*120 RECT 1.68 MT2/ 24 CJ-TAR 08', cantidad: 2, um: 'CJ', kg: 90 }).fuera_de_rango, true);
+  assert.equal(revisarPartida({ sku: 'P061301635P3', producto: 'PEGAPISO', cantidad: 250 }).tarimas_calc, 2);
+  assert.equal(EMBALAJES.length, 46);
 });

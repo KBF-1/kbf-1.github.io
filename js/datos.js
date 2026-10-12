@@ -93,16 +93,40 @@ function bitacora(b, id, texto) {
   b.set(fb.doc(fb.collection(db, 'lc_folios', id, 'historial')), { fecha: ahora(), area: sesion.area, texto });
 }
 
-/* Alta de folios (Ventas). Si el folio ya existe no se toca. */
+/* Pantalla del almacén: copia pública del folio en lc_pantalla, sin direcciones, teléfonos, material ni nombres de clientes
+   de Última Milla (son personas). lc_folios ya no es público. Se reescribe en cada cambio del folio. */
+export function publico(f) {
+  const um = f.tipo_envio === 'ULTIMA_MILLA';
+  return {
+    folio: f.folio, tipo_envio: um ? 'ULTIMA_MILLA' : 'NACIONAL', cliente: um ? 'Última Milla' : f.cliente || '', destino: f.destino || '',
+    transportista: f.transportista || '', tipo_unidad: f.tipo_unidad || '', cita: f.cita || '', anden: f.anden || '',
+    docs: Object.values(f.docs || {}).filter((v) => v === true).length, estatus: f.estatus, entregado: f.entregado || '', actualizado: ahora()
+  };
+}
+const espejo = (b, f, cambios) => b.set(D('lc_pantalla', f.id), publico(Object.assign({}, f, cambios)));
+const txt = (v, n) => String(v === undefined || v === null ? '' : v).slice(0, n || 200);
+
+/* Alta de folios (Ventas). Si el folio ya existe no se toca. Los de Última Milla usan el id UM-<folio> para no chocar con Nacional. */
 export async function crearFolios(grupos) {
   const creados = [], repetidos = [];
   for (const g of grupos) {
-    const id = idFolio(g.folio);
+    const um = g.tipo_envio === 'ULTIMA_MILLA';
+    const id = idFolio(g.folio) ? (um ? 'UM-' : '') + idFolio(g.folio) : '';
     if (!id) throw new Error('Hay un pedido sin folio (' + g.cliente + ').');
     const ok = await fb.runTransaction(db, async (tx) => {
       const ref = D('lc_folios', id);
       if ((await tx.get(ref)).exists()) return false;
-      tx.set(ref, {
+      const e = g.entrega || {};
+      const datos = {
+        tipo_envio: um ? 'ULTIMA_MILLA' : 'NACIONAL', m2: Number(g.m2) || 0,
+        lat: typeof g.lat === 'number' ? g.lat : null, lng: typeof g.lng === 'number' ? g.lng : null,
+        entrega: um ? { recibe: txt(e.recibe), telefono: txt(e.telefono, 40), telefono2: txt(e.telefono2, 40), calle: txt(e.calle), no_ext: txt(e.no_ext, 20),
+          no_int: txt(e.no_int, 20), colonia: txt(e.colonia), cp: txt(e.cp, 10), localidad: txt(e.localidad), municipio: txt(e.municipio), maps: txt(e.maps, 500),
+          observaciones: txt(e.observaciones, 1000), descarga: txt(e.descarga, 20), embarque: txt(e.embarque, 30), orden: txt(e.orden, 30), factura: txt(e.factura, 30),
+          flete_directo: !!e.flete_directo, gran_formato: !!e.gran_formato, adhesivos: !!e.adhesivos, almacen_distinto: !!e.almacen_distinto } : null,
+        material: (g.material || []).slice(0, 300).map((m) => ({ destino: txt(m.destino, 30), orden: txt(m.orden, 30), sku: txt(m.sku, 40), producto: txt(m.producto),
+          formato: txt(m.formato, 60), cantidad: Number(m.cantidad) || 0, um: txt(m.um, 10), tarimas: Number(m.tarimas) || 0, restos: Number(m.restos) || 0,
+          kg: Number(m.kg) || 0, m2: Number(m.m2) || 0, lote: txt(m.lote, 30), oc: txt(m.oc, 60) })),
         folio: g.folio, cliente: g.cliente, destino: g.destino, hojas: g.hojas || [],
         tarimas: Number(g.tarimas) || 0, resto: Number(g.resto) || 0, peso_kg: Number(g.peso_kg) || 0, tipo_unidad: g.tipo_unidad,
         clasificacion: String(g.clasificacion || ''), paradas: (g.paradas || []).slice(0, 40).map((p) => ({
@@ -111,7 +135,9 @@ export async function crearFolios(grupos) {
         estatus: 'RECIBIDO', motivo: '', docs: { factura: false, carta_porte: false, remision: false },
         transportista: '', unidad: '', cita: '', anden: '', salida: '', entregado: '',
         creado: ahora(), actualizado: ahora(), creado_por: sesion.area
-      });
+      };
+      tx.set(ref, datos);
+      tx.set(D('lc_pantalla', id), publico(Object.assign({ id }, datos)));
       tx.set(fb.doc(fb.collection(db, 'lc_folios', id, 'historial')), { fecha: ahora(), area: sesion.area, texto: 'Alta del folio (Recibido)' });
       return true;
     });
@@ -129,6 +155,7 @@ export async function cambiarEstatus(f, estatus, motivo) {
   const cambios = { estatus, motivo: estatus === 'PARADO' || estatus === 'INCOMPLETO' ? String(motivo || '').trim() : '', actualizado: ahora() };
   const b = fb.writeBatch(db);
   b.update(D('lc_folios', f.id), cambios);
+  espejo(b, f, cambios);
   bitacora(b, f.id, 'Estatus: ' + estatus + (cambios.motivo ? ' — ' + cambios.motivo : ''));
   if (estatus === 'PARADO') alertaEn(b, 'parado', f, 'Folio ' + f.folio + ' PARADO: ' + cambios.motivo);
   await b.commit();
@@ -136,6 +163,7 @@ export async function cambiarEstatus(f, estatus, motivo) {
 export async function marcarDocumento(f, clave, valor) {
   const b = fb.writeBatch(db);
   b.update(D('lc_folios', f.id), { ['docs.' + clave]: !!valor, actualizado: ahora() });
+  espejo(b, f, { docs: Object.assign({}, f.docs, { [clave]: !!valor }) });
   bitacora(b, f.id, (valor ? 'Documento entregado: ' : 'Documento retirado: ') + clave.replace('_', ' '));
   await b.commit();
 }
@@ -144,9 +172,11 @@ export async function marcarDocumento(f, clave, valor) {
 export async function despacho(id) { const s = await fb.getDoc(D('lc_despachos', id)); return s.exists() ? s.data() : {}; }
 export async function despachos() { const r = {}; (await fb.getDocs(C('lc_despachos'))).docs.forEach((d) => { r[d.id] = d.data(); }); return r; }
 /* Datos públicos (folio, se ven en la Pantalla) y privados (despacho: operador, placas, tarifa, checklist). */
-export async function guardarDespacho(f, publico, privado, alertaTexto) {
+export async function guardarDespacho(f, visible, privado, alertaTexto) {
+  const publico = visible;
   const b = fb.writeBatch(db);
   b.update(D('lc_folios', f.id), Object.assign({}, publico, { actualizado: ahora() }));
+  espejo(b, f, publico);
   b.set(D('lc_despachos', f.id), Object.assign({}, privado, { actualizado: ahora() }), { merge: true });
   bitacora(b, f.id, 'Asignación: ' + [publico.transportista, publico.unidad, publico.cita && 'cita ' + publico.cita.replace('T', ' '), publico.anden && 'andén ' + publico.anden].filter(Boolean).join(' · '));
   if (alertaTexto) alertaEn(b, 'capacidad', f, alertaTexto);
@@ -162,6 +192,7 @@ export async function guardarChecklist(f, respuestas, revision) {
 export async function salirARuta(f, revision) {
   const b = fb.writeBatch(db);
   b.update(D('lc_folios', f.id), { estatus: 'EN_RUTA', salida: ahora(), actualizado: ahora() });
+  espejo(b, f, { estatus: 'EN_RUTA' });
   bitacora(b, f.id, 'Salió a ruta; monitoreo GPS activo');
   if (!revision.contestado) alertaEn(b, 'sin_checklist', f, 'El folio ' + f.folio + ' salió a ruta SIN checklist pre-salida.');
   else if (!revision.pasa) alertaEn(b, 'checklist', f, 'El folio ' + f.folio + ' salió a ruta con checklist reprobado: ' + revision.reprobados.join(', '));
@@ -169,9 +200,18 @@ export async function salirARuta(f, revision) {
 }
 export async function entregar(f) {
   const b = fb.writeBatch(db);
-  b.update(D('lc_folios', f.id), { estatus: 'ENTREGADO', entregado: ahora(), actualizado: ahora() });
+  const cuando = ahora();
+  b.update(D('lc_folios', f.id), { estatus: 'ENTREGADO', entregado: cuando, actualizado: cuando });
+  espejo(b, f, { estatus: 'ENTREGADO', entregado: cuando });
   bitacora(b, f.id, 'Entregado');
   await b.commit();
+}
+
+/* Ubicación de entrega de un folio de Última Milla (coordenadas y, si la hay, la liga de Google Maps). */
+export async function guardarUbicacion(f, pos, liga) {
+  const cambios = { lat: pos.lat, lng: pos.lng, actualizado: ahora() };
+  if (liga && f.entrega) cambios['entrega.maps'] = txt(liga, 500);
+  await fb.updateDoc(D('lc_folios', f.id), cambios);
 }
 
 /* Catálogos (Transporte y Administrador). */

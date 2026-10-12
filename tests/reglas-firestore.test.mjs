@@ -25,11 +25,26 @@ test.before(async () => {
 });
 test.after(() => env.cleanup());
 
-test('Pantalla: sin sesión lee folios, no despachos (tarifa)', async () => {
+test('Pantalla: sin sesión solo lee lc_pantalla (no folios, material, direcciones ni tarifas)', async () => {
   const anon = env.unauthenticatedContext().firestore();
-  await assertSucceeds(getDocs(collection(anon, 'lc_folios')));
+  await assertSucceeds(getDocs(collection(anon, 'lc_pantalla')));
+  await assertFails(getDocs(collection(anon, 'lc_folios')));
   await assertFails(getDoc(doc(anon, 'lc_despachos', 'F1')));
   await assertFails(setDoc(doc(anon, 'lc_folios', 'X'), folio({ folio: 'X' })));
+  await assertFails(setDoc(doc(anon, 'lc_pantalla', 'X'), { folio: 'X', docs: 0 }));
+  const pan = { folio: '100', tipo_envio: 'NACIONAL', cliente: 'Cliente', destino: 'León', transportista: '', tipo_unidad: 'SENCILLO', cita: '', anden: '', docs: 1, estatus: 'RECIBIDO', entregado: '', actualizado: 'x' };
+  await assertSucceeds(setDoc(doc(como('operacion'), 'lc_pantalla', 'F1'), pan));
+  await assertFails(setDoc(doc(como('operacion'), 'lc_pantalla', 'F1'), { ...pan, tarifa: 100 }));
+  await assertFails(setDoc(doc(como('operacion'), 'lc_pantalla', 'F1'), { ...pan, telefono: '1' }));
+  await assertSucceeds(getDocs(collection(como('ventas'), 'lc_folios')));
+});
+test('Última Milla: folio con entrega y material', async () => {
+  const um = folio({ folio: '9001', tipo_envio: 'ULTIMA_MILLA', m2: 36.96, lat: null, lng: null, material: [],
+    entrega: { recibe: 'X', telefono: '1', calle: 'C', maps: 'https://maps.app.goo.gl/x', descarga: 'MANUAL' } });
+  await assertSucceeds(setDoc(doc(como('ventas'), 'lc_folios', 'UM-9001'), um));
+  await assertFails(setDoc(doc(como('ventas'), 'lc_folios', 'UM-9002'), { ...um, folio: '9002', tipo_envio: 'OTRO' }));
+  await assertSucceeds(updateDoc(doc(como('transporte'), 'lc_folios', 'UM-9001'), { lat: 22.7, lng: -102.5, 'entrega.maps': 'https://www.google.com/maps/@22.7,-102.5,15z' }));
+  await assertFails(updateDoc(doc(como('operacion'), 'lc_folios', 'UM-9001'), { lat: 1, lng: 1 }));
 });
 test('Tarifa: solo Transporte y Administrador', async () => {
   await assertFails(getDoc(doc(como('ventas'), 'lc_despachos', 'F1')));

@@ -1,7 +1,8 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
 import * as API from './datos.js';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios } from './reglas.js';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js';
 import { leerLibro, interpretar, combinar } from './acopio.js';
 import { planear } from './ruta.js';
 import { ubicacion } from './gps.js';
@@ -126,6 +127,11 @@ const ORDEN = Object.keys(ESTATUS);
 function pill(estatus) { const e = ESTATUS[estatus] || { nombre: estatus, color: 'gris' }; return h('span', { class: 'pill ' + e.color }, h('i', { 'aria-hidden': 'true' }), e.nombre); }
 function docsChip(f) { const n = docsAvance(f.docs); return h('span', { class: 'docs ' + (n === 3 ? 'ok' : n ? 'medio' : 'no'), title: 'Documentos entregados' }, n + '/3'); }
 const porFecha = (a, b) => (a.creado < b.creado ? 1 : -1);
+/* Nacional (Formato de Acopio: bodegas y obras) o Última Milla (Cuadro de Envío: domicilio del cliente). */
+const esUM = (f) => f.tipo_envio === 'ULTIMA_MILLA';
+const envioChip = (f) => h('span', { class: 'envio ' + (esUM(f) ? 'um' : 'nac') }, esUM(f) ? 'Última Milla' : 'Nacional');
+const FILTROS_ENVIO = [['todos', 'Todos'], ['NACIONAL', 'Nacional'], ['ULTIMA_MILLA', 'Última Milla']];
+const leerFiltro = () => { try { return sessionStorage.getItem('lc-envio') || 'todos'; } catch (e) { return 'todos'; } };
 
 function encabezado(titulo, texto, ...acciones) {
   return h('div', { class: 'encabezado' }, h('div', null, h('h1', null, titulo), texto ? h('p', { class: 'gris' }, texto) : null), h('div', { class: 'acciones' }, acciones));
@@ -137,17 +143,23 @@ function contadores(lista, claves) {
 function tabla(lista, columnas, alClic, vacio) {
   const cuerpo = h('tbody');
   const buscar = entrada({ type: 'search', placeholder: 'Buscar folio, cliente o destino…', 'aria-label': 'Buscar' });
+  let envio = leerFiltro();
+  const chips = h('div', { class: 'segmento', role: 'group', 'aria-label': 'Tipo de envío' });
+  const pintarChips = () => mount(chips, FILTROS_ENVIO.map(([k, t]) => h('button', { type: 'button', class: k === envio ? 'activa' : '', 'aria-pressed': String(k === envio),
+    onclick: () => { envio = k; try { sessionStorage.setItem('lc-envio', k); } catch (e) { /* sin almacenamiento */ } pintarChips(); pintar(); } },
+  t + ' (' + lista.filter((f) => k === 'todos' || (f.tipo_envio || 'NACIONAL') === k).length + ')')));
   const pintar = () => {
     const q = norm(buscar.value);
-    const vis = lista.filter((f) => !q || norm([f.folio, f.cliente, f.destino, f.transportista].join(' ')).includes(q));
+    const vis = lista.filter((f) => (envio === 'todos' || (f.tipo_envio || 'NACIONAL') === envio) && (!q || norm([f.folio, f.cliente, f.destino, f.transportista].join(' ')).includes(q)));
     mount(cuerpo, vis.length ? vis.map((f) => h('tr', { class: alClic ? 'clic' : '', tabindex: alClic ? '0' : null,
       onclick: alClic ? (e) => { if (!e.target.closest('input,select,button,textarea,a')) alClic(f); } : null,
       onkeydown: alClic ? (e) => { if (e.key === 'Enter' && e.target.tagName === 'TR') alClic(f); } : null },
     columnas.map(([, fn, c]) => h('td', { class: c || null }, fn(f))))) : h('tr', null, h('td', { colspan: columnas.length, class: 'gris centro' }, vacio || 'Sin folios.')));
   };
   buscar.addEventListener('input', pintar);
+  pintarChips();
   pintar();
-  return h('div', null, h('div', { class: 'filtros' }, buscar),
+  return h('div', null, h('div', { class: 'filtros' }, chips, buscar),
     h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla' }, h('thead', null, h('tr', null, columnas.map(([t, , c]) => h('th', { class: c || null }, t)))), cuerpo)));
 }
 /* Ficha del folio: datos, documentos e historial. */
@@ -155,7 +167,8 @@ async function ficha(f) {
   const hist = h('ul', { class: 'historial' }, h('li', { class: 'gris' }, 'Cargando…'));
   modal('Folio ' + f.folio,
     h('div', { class: 'ficha' },
-      dato('Estatus', pill(f.estatus)), dato('Cliente', f.cliente), dato('Destino', f.destino || '—'),
+      dato('Estatus', pill(f.estatus)), dato('Envío', envioChip(f)), dato('Cliente', f.cliente), dato('Destino', f.destino || '—'),
+      f.m2 ? dato('Metros', f.m2 + ' m²') : null,
       dato('Tarimas', String(f.tarimas) + (f.resto ? ' + ' + f.resto + ' cajas sueltas' : '')), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad),
       f.clasificacion ? dato('Clasificación', f.clasificacion) : null,
       dato('Documentos', DOCUMENTOS.map(([k, n]) => (f.docs && f.docs[k] ? '✓ ' : '✗ ') + n).join('  ')),
@@ -163,12 +176,54 @@ async function ficha(f) {
       f.transportista ? dato('Transportista', f.transportista + (f.unidad ? ' · ' + f.unidad : '')) : null,
       f.cita ? dato('Cita', fecha(f.cita) + (f.anden ? ' · andén ' + f.anden : '')) : null,
       f.hojas && f.hojas.length ? dato('Hojas del acopio', f.hojas.join(', ')) : null),
+    f.entrega ? [h('h3', null, 'Entrega (Última Milla)'), bloqueEntrega(f)] : null,
     f.paradas && f.paradas.length ? [h('h3', null, 'Destinos de envío'), h('div', { class: 'tabla-scroll' }, tablaParadas(f.paradas))] : null,
+    f.material && f.material.length ? [h('h3', null, 'Material (' + f.material.length + ' partidas)'), tablaMaterial(f.material)] : null,
     h('h3', null, 'Historial'), hist);
   try { const r = await API.historial(f.id); mount(hist, r.length ? r.map((x) => h('li', null, h('b', null, fecha(x.fecha)), ' · ', CFG.areas[x.area] ? CFG.areas[x.area].nombre : x.area, ' — ', x.texto)) : h('li', { class: 'gris' }, 'Sin movimientos.')); }
   catch (e) { mount(hist, h('li', { class: 'gris' }, API.amigable(e))); }
 }
 const dato = (t, v) => h('div', { class: 'dato' }, h('span', null, t), h('b', null, v));
+/* Datos de entrega de Última Milla: dirección, quién recibe, teléfonos, descarga y liga de Google Maps. */
+const direccion = (e) => [[e.calle, e.no_ext && 'No. ' + e.no_ext, e.no_int && 'Int. ' + e.no_int].filter(Boolean).join(' '), e.colonia && 'Col. ' + e.colonia,
+  e.cp && 'CP ' + e.cp, [e.localidad, e.municipio !== e.localidad ? e.municipio : ''].filter(Boolean).join(', ')].filter(Boolean).join(', ');
+const ligaMaps = (f) => (f.entrega && f.entrega.maps) || (typeof f.lat === 'number' ? 'https://www.google.com/maps/search/?api=1&query=' + f.lat + ',' + f.lng : '');
+function bloqueEntrega(f) {
+  const e = f.entrega || {}, liga = ligaMaps(f);
+  const marcas = [e.flete_directo && 'Pago de flete directo', e.gran_formato && 'Gran formato', e.adhesivos && 'Adhesivos', e.almacen_distinto && 'Material de almacén distinto al 2100'].filter(Boolean);
+  return h('div', { class: 'entrega' },
+    h('div', { class: 'ficha' },
+      dato('Recibe', e.recibe || f.cliente), dato('Teléfonos', [e.telefono, e.telefono2].filter(Boolean).join(' · ') || '—'),
+      dato('Dirección', direccion(e) || '—'), dato('Descarga', e.descarga ? (e.descarga === 'MANUAL' ? 'Manual' : 'Montacargas') : '—'),
+      e.embarque || e.orden || e.factura ? dato('Embarque · Orden · Factura', [e.embarque, e.orden, e.factura].map((x) => x || '—').join(' · ')) : null,
+      dato('Ubicación', typeof f.lat === 'number' ? f.lat.toFixed(5) + ', ' + f.lng.toFixed(5) : 'Sin coordenadas')),
+    marcas.length ? h('p', { class: 'marcas' }, marcas.map((m) => h('span', { class: 'pill amarillo' }, h('i'), m))) : null,
+    e.observaciones ? h('p', { class: 'aviso' }, 'Observaciones: ' + e.observaciones) : null,
+    liga ? h('p', null, h('a', { class: 'btn chico', href: liga, target: '_blank', rel: 'noopener' }, 'Abrir en Google Maps ↗')) : null);
+}
+/* Desglose del material por partida, revisado contra Pesos y Embalajes. */
+function tablaMaterial(material) {
+  let fuera = 0;
+  const filas = material.map((m) => {
+    const r = revisarPartida(m), e = r.embalaje;
+    if (r.fuera_de_rango) fuera++;
+    const difTar = e && !e.adhesivo && r.tarimas_calc !== undefined && (r.tarimas_calc !== m.tarimas || r.restos_calc !== m.restos);
+    return h('tr', { class: r.fuera_de_rango ? 'alerta' : '' },
+      h('td', null, m.destino || '—'), h('td', null, h('b', null, m.producto), h('br'), h('small', { class: 'gris' }, [m.sku, m.lote && 'lote ' + m.lote, m.oc && 'OC ' + m.oc].filter(Boolean).join(' · '))),
+      h('td', { class: 'num' }, String(m.cantidad) + ' ' + (m.um || '')), h('td', { class: 'num' }, String(m.tarimas)), h('td', { class: 'num' }, m.restos ? String(m.restos) : '—'),
+      h('td', { class: 'num' }, kg(m.kg)), h('td', { class: 'num' }, m.m2 ? String(m.m2) : '—'),
+      h('td', { class: 'chico' }, !e ? h('span', { class: 'gris' }, 'Sin formato en la tabla')
+        : e.adhesivo ? [e.paquetes_tarima + ' paquetes por tarima']
+          : [h('b', null, e.formato), h('br'), e.cajas_tarima + ' cj/tarima · tarima ' + e.tarima + ' · ' + e.altura_cm + ' cm · estiba ' + e.estiba,
+            r.kg_min !== undefined ? [h('br'), 'Peso esperado ' + kg(r.kg_min) + ' – ' + kg(r.kg_max)] : null,
+            r.fuera_de_rango ? [h('br'), h('b', { class: 'rojo' }, '⚠ Kilos fuera del rango de la tabla')] : null,
+            difTar ? [h('br'), h('span', { class: 'amarillo' }, 'Según la tabla: ' + r.tarimas_calc + ' tarimas + ' + r.restos_calc + ' cajas')] : null]));
+  });
+  return h('div', null, fuera ? h('p', { class: 'aviso mal' }, fuera + ' partida(s) con kilos fuera del rango de Pesos y Embalajes.') : null,
+    h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta material' },
+      h('thead', null, h('tr', null, ['Destino', 'Producto', 'Cantidad', 'Tarimas', 'Restos', 'Kg', 'm²', 'Embalaje (' + REVISION + ')'].map((t) => h('th', null, t)))),
+      h('tbody', null, filas))));
+}
 /* Lugares de entrega del folio: cada destino de envío del acopio («sucursal · ciudad»), o el destino escrito a mano. */
 const lugaresDe = (f) => (f.paradas && f.paradas.length
   ? [...new Set(f.paradas.map((p) => [p.sucursal, p.ciudad].filter(Boolean).join(' · ')))]
@@ -197,15 +252,15 @@ async function ventas() {
   });
   mount(main, vista);
   mount(vista,
-    encabezado('Ventas', 'Sube uno o varios Formatos de Acopio: cada archivo es un folio con sus destinos de envío, tarimas, restos y peso. Quedan como «Recibido».'),
+    encabezado('Ventas', 'Sube Formatos de Acopio (Nacional: bodegas y obras) o Cuadros de Envío (Última Milla: domicilio del cliente). Cada archivo es un folio y queda como «Recibido».'),
     h('section', { class: 'tarjeta' },
-      h('h2', null, 'Formato de Acopio'),
-      campo('Archivos (.xlsm o .xlsx)', archivo, 'Puedes elegir varios a la vez. Se leen las hojas Base, CB360 y Exhibición. Antes de crear los folios puedes revisar, corregir y juntar folios que viajan en la misma unidad.'),
+      h('h2', null, 'Formato de Acopio o Cuadro de Envío'),
+      campo('Archivos (.xlsm o .xlsx)', archivo, 'Puedes elegir varios a la vez, de los dos tipos. Del acopio se leen Base, CB360 y Exhibición con el material partida por partida; del Cuadro de Envío, la dirección, teléfonos, liga de Google Maps, peso y metros. Antes de crear los folios puedes revisar, corregir y juntar acopios que viajan en la misma unidad.'),
       h('button', { class: 'btn chico', type: 'button', onclick: () => mostrarPrevia(previa, [], [], 'captura a mano') }, 'Capturar sin archivo'),
       previa),
     h('section', { class: 'tarjeta' }, h('h2', null, 'Folios'),
       tabla(lista, [
-        ['Folio', (f) => h('b', null, f.folio)], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
+        ['Folio', (f) => h('b', null, f.folio)], ['Envío', envioChip], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
         ['Tarimas', (f) => String(f.tarimas), 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'], ['Tipo', (f) => f.tipo_unidad], ['Docs', docsChip, 'centro'],
         ['Estatus', (f) => pill(f.estatus)], ['Alta', (f) => fecha(f.creado)]
       ], ficha)));
@@ -237,9 +292,11 @@ function mostrarPrevia(destino, grupos, avisos, nombre) {
         h('td', null, num('tarimas', 0.01)), h('td', null, num('resto', 1)), h('td', null, num('peso_kg', 1)),
         h('td', null, h('b', { class: r.tipo_unidad === 'FULL' ? 'tipo full' : 'tipo' }, r.tipo_unidad)),
         h('td', null, h('button', { class: 'btn-x', 'aria-label': 'Quitar renglón', onclick: () => { filas.splice(i, 1); pintar(); } }, '×')));
-      const det = r.paradas && r.paradas.length ? h('tr', { class: 'detalle' + (r.incluir ? '' : ' apagado') }, h('td'), h('td', { colspan: 8 },
-        h('small', { class: 'gris' }, [r.archivo, (r.hojas || []).length ? 'hojas ' + r.hojas.join(', ') : '', r.renglones ? r.renglones + ' partidas' : ''].filter(Boolean).join(' · ')),
-        tablaParadas(r.paradas))) : null;
+      const det = (r.paradas && r.paradas.length) || r.entrega ? h('tr', { class: 'detalle' + (r.incluir ? '' : ' apagado') }, h('td'), h('td', { colspan: 8 },
+        h('small', { class: 'gris' }, [envioChip(r), ' ', [r.archivo, (r.hojas || []).length ? 'hojas ' + r.hojas.join(', ') : '', r.material && r.material.length ? r.material.length + ' partidas' : '', r.m2 ? r.m2 + ' m²' : ''].filter(Boolean).join(' · ')]),
+        r.entrega ? bloqueEntrega(r) : null,
+        tablaParadas(r.paradas),
+        r.material && r.material.length ? h('details', { class: 'desglose' }, h('summary', null, 'Ver material (' + r.material.length + ' partidas)'), tablaMaterial(r.material)) : null)) : null;
       return [fila, det].filter(Boolean);
     }));
     const sel = filas.filter((r) => r.incluir);
@@ -251,6 +308,7 @@ function mostrarPrevia(destino, grupos, avisos, nombre) {
   juntar.addEventListener('click', () => {
     const sel = filas.filter((r) => r.incluir);
     if (sel.length < 2) return;
+    if (sel.some(esUM)) { toast('Solo se juntan folios Nacionales. Los de Última Milla se ordenan en Última Milla.', true); return; }
     const uno = Object.assign({ incluir: true, archivo: sel.map((r) => r.archivo).filter(Boolean).join(' + ') }, combinar(sel));
     const pos = filas.indexOf(sel[0]);
     sel.forEach((r) => filas.splice(filas.indexOf(r), 1));
@@ -291,7 +349,7 @@ async function operacion() {
     encabezado('Operación', 'Armado físico y documentos. No se puede pasar a «Listo para transporte» mientras falte Factura, Carta Porte o Remisión.'),
     contadores(lista, ESTATUS_OPERACION),
     h('section', { class: 'tarjeta' }, tabla(lista, [
-      ['Folio', (f) => h('b', null, f.folio)], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
+      ['Folio', (f) => h('b', null, f.folio)], ['Envío', envioChip], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
       ['Tarimas', (f) => String(f.tarimas), 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'],
       ['Documentos', (f) => h('div', { class: 'docs-check' }, DOCUMENTOS.map(([k, n]) => h('label', null,
         h('input', { type: 'checkbox', checked: !!(f.docs && f.docs[k]), disabled: f.estatus === 'LISTO' && f.docs[k], title: f.estatus === 'LISTO' ? 'Para quitar un documento, primero regresa el folio de Listo' : null,
@@ -337,7 +395,7 @@ async function transporte() {
     mount(zona,
       h('div', { class: 'pestanas', role: 'tablist' }, Object.entries(grupos).map(([k, [t, fn]]) => h('button', { role: 'tab', 'aria-selected': String(k === filtro), class: k === filtro ? 'activa' : '', onclick: () => { filtro = k; pintar(); } }, t + ' (' + todos.filter(fn).length + ')'))),
       h('section', { class: 'tarjeta' }, tabla(lista, [
-        ['Folio', (f) => h('b', null, f.folio)], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
+        ['Folio', (f) => h('b', null, f.folio)], ['Envío', envioChip], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
         ['Peso', (f) => h('span', null, kg(f.peso_kg), h('br'), h('small', { class: 'gris' }, f.tipo_unidad)), 'num'],
         ['Transportista', (f) => f.transportista ? h('span', null, f.transportista, h('br'), h('small', { class: 'gris' }, f.unidad)) : h('span', { class: 'gris' }, 'Sin asignar')],
         ['Cita', (f) => f.cita ? fecha(f.cita) + (f.anden ? ' · A' + f.anden : '') : '—'],
@@ -411,6 +469,7 @@ function panelDespacho(f, unidades, d) {
 
   const dlg = modal('Despacho · ' + f.folio,
     h('div', { class: 'ficha' }, dato('Cliente', f.cliente), dato('Destino', f.destino || '—'), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad), dato('Tarimas', String(f.tarimas)), dato('Documentos', docsAvance(f.docs) + '/3'), dato('Estatus', pill(f.estatus))),
+    f.entrega ? [h('h3', null, 'Entrega (Última Milla)'), bloqueEntrega(f)] : null,
     h('h3', null, 'Asignación'),
     !unidades.length ? h('p', { class: 'aviso' }, 'Aún no hay unidades en el catálogo. ', h('a', { href: '#catalogos', onclick: () => dlg.cerrar() }, 'Agregar unidades')) : null,
     h('div', { class: 'rejilla' },
@@ -439,7 +498,7 @@ async function monitoreo() {
   try { L = await cargarMapa(); mapa = mapaEn(L, mapaDiv, origen); capa = L.layerGroup().addTo(mapa); L.marker([origen.lat, origen.lng], { title: origen.nombre }).addTo(mapa).bindTooltip(origen.nombre); }
   catch (e) { mount(mapaDiv, h('p', { class: 'gris centro' }, e.message)); }
   // Para simular el avance se usa el primer lugar de entrega que tenga coordenadas.
-  const coordsDe = (f) => lugaresDe(f).map((l) => destinos.find((d) => norm(d.nombre) === norm(l))).find(Boolean);
+  const coordsDe = (f) => (typeof f.lat === 'number' ? { lat: f.lat, lng: f.lng } : lugaresDe(f).map((l) => destinos.find((d) => norm(d.nombre) === norm(l))).find(Boolean));
   const actualizar = async () => {
     if (!enRuta.length) return;
     const token = await API.tokenGps();
@@ -458,7 +517,7 @@ async function monitoreo() {
         h('p', { class: 'gris chico' }, [f.transportista, f.unidad, d.operador, d.placas].filter(Boolean).join(' · ')),
         h('p', null, h('b', null, p.velocidad + ' km/h'), ' · ', fecha(p.hora), p.faltan_km !== undefined && !real ? ' · faltan ~' + p.faltan_km + ' km' : '', p.lugar ? ' · ' + p.lugar : ''),
         !real && p.motivo ? h('p', { class: 'gris chico' }, p.motivo) : null,
-        !coordsDe(f) && !real ? h('p', { class: 'gris chico' }, 'El destino no tiene coordenadas; captúralas en Catálogos para simular el avance.') : null);
+        !coordsDe(f) && !real ? h('p', { class: 'gris chico' }, esUM(f) ? 'El folio no tiene ubicación; pégala en Última Milla para simular el avance.' : 'El destino no tiene coordenadas; captúralas en Catálogos para simular el avance.') : null);
     }));
     if (mapa && puntos.length) mapa.fitBounds(L.latLngBounds(puntos.concat([[origen.lat, origen.lng]])).pad(0.2), { maxZoom: 11 });
   };
@@ -468,44 +527,59 @@ async function monitoreo() {
 
 /* ================================================================== ÚLTIMA MILLA */
 async function ruta() {
-  const [todos, destinos, general, rutas] = await Promise.all([API.folios(), API.catalogo('destinos'), API.config('general'), API.catalogo('rutas')]);
+  const [todos, general, rutas] = await Promise.all([API.folios(), API.config('general'), API.catalogo('rutas')]);
   const origen = general.lat ? general : CFG.origen;
-  const candidatos = todos.filter((f) => !['ENTREGADO', 'EN_RUTA'].includes(f.estatus)).sort((a, b) => String(a.destino).localeCompare(String(b.destino)));
+  // Solo folios de Última Milla (Cuadro de Envío). Los Nacionales van a bodegas y obras y no se planean aquí.
+  const candidatos = todos.filter((f) => esUM(f) && !['ENTREGADO', 'EN_RUTA'].includes(f.estatus)).sort((a, b) => String(a.destino).localeCompare(String(b.destino)));
   const elegidos = new Set();
-  const coords = new Map(destinos.map((d) => [norm(d.nombre), d]));
   const regresa = h('input', { type: 'checkbox', id: 'regresa' });
   const resultado = h('div');
-  const campoCoords = (lugar) => {
-    const d = coords.get(norm(lugar));
-    return h('label', { class: 'coord' }, h('small', null, lugar), entrada({ value: d ? d.lat + ', ' + d.lng : '', placeholder: 'lat, lng', class: 'entrada corta-l', 'aria-label': 'Coordenadas de ' + lugar,
+  const campoUbicacion = (f) => {
+    const liga = f.entrega && f.entrega.maps;
+    const tiene = typeof f.lat === 'number';
+    const estado = h('small', { class: tiene ? 'ok' : 'gris' }, tiene ? '✓ ' + f.lat.toFixed(5) + ', ' + f.lng.toFixed(5) : 'Sin ubicación');
+    const input = entrada({ placeholder: 'Pega la liga de Google Maps o lat, lng', class: 'entrada', 'aria-label': 'Ubicación de ' + f.folio,
       onchange: async (e) => {
-        const p = leerCoordenadas(e.target.value);
-        if (!p) { toast('Escribe latitud y longitud, por ejemplo 19.4326, -99.1332 (en Google Maps: clic derecho sobre el lugar).', true); return; }
-        const ya = coords.get(norm(lugar));
-        try { const id = await API.guardarEn('destinos', ya ? ya.id : null, { nombre: lugar, lat: p.lat, lng: p.lng }); coords.set(norm(lugar), { id, nombre: lugar, lat: p.lat, lng: p.lng }); e.target.value = p.lat + ', ' + p.lng; toast('Coordenadas guardadas para ' + lugar + '.'); } catch (x) { err(x); }
-      } }));
+        const v = e.target.value.trim();
+        if (!v) return;
+        const p = leerCoordenadas(v);
+        if (!p) {
+          toast(esLigaCorta(v)
+            ? 'Esa liga corta (maps.app.goo.gl) no trae la ubicación. Ábrela, espera a que cargue el mapa y copia la liga larga de la barra de direcciones.'
+            : 'No encontré la ubicación. Pega la liga de Google Maps (la larga, de la barra de direcciones) o escribe lat, lng.', true);
+          return;
+        }
+        try { await API.guardarUbicacion(f, p, /^https?:/i.test(v) ? v : ''); f.lat = p.lat; f.lng = p.lng; if (/^https?:/i.test(v) && f.entrega) f.entrega.maps = v; e.target.value = ''; estado.className = 'ok'; estado.textContent = '✓ ' + p.lat.toFixed(5) + ', ' + p.lng.toFixed(5); toast('Ubicación guardada para ' + f.folio + '.'); } catch (x) { err(x); }
+      } });
+    return h('div', { class: 'ubicacion' }, estado, h('div', { class: 'fila-ub' }, input,
+      liga ? h('a', { class: 'btn chico', href: liga, target: '_blank', rel: 'noopener', title: 'Abre la liga del Cuadro de Envío' }, 'Abrir liga ↗') : null),
+    !tiene && liga && esLigaCorta(liga) ? h('small', { class: 'gris' }, 'La liga del cuadro es corta: ábrela y pega aquí la liga larga que sale en la barra de direcciones.') : null);
   };
   const filas = candidatos.map((f) => h('tr', null, h('td', null, h('input', { type: 'checkbox', 'aria-label': 'Incluir ' + f.folio, onchange: (e) => (e.target.checked ? elegidos.add(f.id) : elegidos.delete(f.id)) })),
-    h('td', null, h('b', null, f.folio)), h('td', null, f.cliente), h('td', null, kg(f.peso_kg)), h('td', null, pill(f.estatus)),
-    h('td', null, h('div', { class: 'coords' }, lugaresDe(f).map(campoCoords)))));
+    h('td', null, h('b', null, f.folio)), h('td', null, (f.entrega && f.entrega.recibe) || f.cliente, h('br'), h('small', { class: 'gris' }, f.entrega ? direccion(f.entrega) : f.destino)),
+    h('td', { class: 'num' }, kg(f.peso_kg)), h('td', null, pill(f.estatus)), h('td', null, campoUbicacion(f))));
   const calcular = h('button', { class: 'btn primario' }, 'Calcular ruta más corta');
   calcular.addEventListener('click', async () => {
     const sel = candidatos.filter((f) => elegidos.has(f.id));
     if (sel.length < 1) { toast('Elige al menos un folio.', true); return; }
-    const sin = [...new Set(sel.flatMap(lugaresDe).filter((l) => !coords.get(norm(l))))];
-    if (sin.length) { toast('Faltan coordenadas de: ' + sin.join(', '), true); return; }
-    // Cada lugar de entrega es una parada; varios folios al mismo lugar = una sola parada.
+    const sin = sel.filter((f) => typeof f.lat !== 'number');
+    if (sin.length) { toast('Falta la ubicación de: ' + sin.map((f) => f.folio).join(', '), true); return; }
+    // Folios con la misma ubicación = una sola parada.
     const paradas = [];
-    sel.forEach((f) => lugaresDe(f).forEach((l) => { const d = coords.get(norm(l)); let p = paradas.find((x) => norm(x.nombre) === norm(l)); if (!p) paradas.push(p = { nombre: l, lat: d.lat, lng: d.lng, folios: [] }); if (!p.folios.includes(f.folio)) p.folios.push(f.folio); }));
+    sel.forEach((f) => {
+      let p = paradas.find((x) => Math.abs(x.lat - f.lat) < 1e-5 && Math.abs(x.lng - f.lng) < 1e-5);
+      if (!p) paradas.push(p = { nombre: (f.entrega && (f.entrega.colonia || f.entrega.localidad)) || f.destino || f.folio, lat: f.lat, lng: f.lng, folios: [] });
+      p.folios.push(f.folio);
+    });
     const plan = planear(origen, paradas, regresa.checked);
     await pintarRuta(resultado, origen, plan, regresa.checked, sel);
   });
-  mount(main, encabezado('Última Milla', 'Orden de paradas para repartir varios folios en un mismo viaje.'),
+  mount(main, encabezado('Última Milla', 'Orden de entregas a domicilio (folios del Cuadro de Envío) para un mismo viaje.'),
     h('p', { class: 'aviso' }, 'Aproximación por distancia en línea recta: no es la distancia real por carretera. El cálculo se hace aquí mismo; no usa Samsara ni se manda a otro sistema.'),
     h('section', { class: 'tarjeta' },
-      h('p', { class: 'gris chico' }, 'Sale de: ', h('b', null, origen.nombre), ' (' + origen.lat + ', ' + origen.lng + '). Las coordenadas de cada destino se capturan una vez y se reutilizan.'),
-      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['', 'Folio', 'Cliente', 'Peso', 'Estatus', 'Lugares de entrega y coordenadas'].map((t) => h('th', null, t)))),
-        h('tbody', null, filas.length ? filas : h('tr', null, h('td', { colspan: 6, class: 'gris centro' }, 'No hay folios pendientes.'))))),
+      h('p', { class: 'gris chico' }, 'Sale de: ', h('b', null, origen.nombre), '. La ubicación sale de la liga de Google Maps del Cuadro de Envío; si es liga corta, ábrela y pega la liga larga una vez.'),
+      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['', 'Folio', 'Recibe · Dirección', 'Peso', 'Estatus', 'Ubicación'].map((t) => h('th', null, t)))),
+        h('tbody', null, filas.length ? filas : h('tr', null, h('td', { colspan: 6, class: 'gris centro' }, 'No hay folios de Última Milla pendientes.'))))),
       h('div', { class: 'acciones' }, h('label', { class: 'casilla' }, regresa, ' Regresar al origen al terminar'), calcular)),
     resultado,
     rutas.length ? h('section', { class: 'tarjeta' }, h('h2', null, 'Rutas guardadas'), h('ul', { class: 'historial' },
@@ -536,7 +610,7 @@ async function pintarRuta(destino, origen, plan, regresa, folios) {
 
 /* ================================================================== CATÁLOGOS */
 async function catalogos() {
-  const [unidades, destinos] = await Promise.all([API.catalogo('unidades'), API.catalogo('destinos')]);
+  const [unidades, destinos, folios] = await Promise.all([API.catalogo('unidades'), API.catalogo('destinos'), API.folios()]);
   const editarUnidad = (u) => {
     u = u || {};
     const c = { transportista: entrada({ value: u.transportista || '', required: true }), nombre: entrada({ value: u.nombre || '', required: true, placeholder: 'Económico o nombre' }),
@@ -551,7 +625,7 @@ async function catalogos() {
     } }, h('div', { class: 'rejilla' }, campo('Transportista', c.transportista), campo('Unidad', c.nombre), campo('Tipo', c.tipo), campo('Capacidad (kg)', c.capacidad_kg),
       campo('Placas', c.placas), campo('Vehículo Samsara', c.samsara_id, 'Si está vacío, el Monitoreo usa datos simulados.')), h('div', { class: 'acciones' }, btn)));
   };
-  mount(main, encabezado('Catálogos', 'Unidades por transportista y coordenadas de destinos.'),
+  mount(main, encabezado('Catálogos', 'Unidades por transportista, ubicación de destinos Nacionales y Pesos y Embalajes.'),
     h('section', { class: 'tarjeta' }, h('div', { class: 'cabecera' }, h('h2', null, 'Unidades'), h('button', { class: 'btn primario', onclick: () => editarUnidad() }, '+ Nueva unidad')),
       h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla' }, h('thead', null, h('tr', null, ['Transportista', 'Unidad', 'Tipo', 'Capacidad', 'Placas', 'Samsara', ''].map((t) => h('th', null, t)))),
         h('tbody', null, unidades.length ? unidades.sort((a, b) => (a.transportista + a.nombre).localeCompare(b.transportista + b.nombre)).map((u) => h('tr', null,
@@ -560,13 +634,49 @@ async function catalogos() {
           h('td', null, h('button', { class: 'btn chico', onclick: () => editarUnidad(u) }, 'Editar'), ' ',
             h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar la unidad ' + u.nombre + '?')) { try { await API.borrarDe('unidades', u.id); catalogos().catch(fallo); } catch (x) { err(x); } } } }, 'Borrar'))))
           : h('tr', null, h('td', { colspan: 7, class: 'gris centro' }, 'Sin unidades.')))))),
-    h('section', { class: 'tarjeta' }, h('h2', null, 'Destinos con coordenadas'),
-      h('p', { class: 'gris chico' }, 'Se capturan en Última Milla la primera vez que aparece un destino. Aquí se corrigen.'),
-      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Destino', 'Coordenadas', ''].map((t) => h('th', null, t)))),
-        h('tbody', null, destinos.length ? destinos.sort((a, b) => a.nombre.localeCompare(b.nombre)).map((d) => h('tr', null, h('td', null, d.nombre),
-          h('td', null, entrada({ value: d.lat + ', ' + d.lng, class: 'entrada corta-l', 'aria-label': 'Coordenadas', onchange: async (e) => { const p = leerCoordenadas(e.target.value); if (!p) { toast('Coordenadas no válidas.', true); return; } try { await API.guardarEn('destinos', d.id, { nombre: d.nombre, lat: p.lat, lng: p.lng }); toast('Guardado.'); } catch (x) { err(x); } } })),
-          h('td', null, h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar ' + d.nombre + '?')) { try { await API.borrarDe('destinos', d.id); catalogos().catch(fallo); } catch (x) { err(x); } } } }, 'Borrar'))))
-          : h('tr', null, h('td', { colspan: 3, class: 'gris centro' }, 'Sin destinos.')))))));
+    seccionDestinos(destinos, folios),
+    seccionEmbalajes());
+}
+/* Destinos Nacionales (sucursales, bodegas y obras): ubicación por liga de Google Maps o lat, lng; se usa en el Monitoreo. */
+function seccionDestinos(destinos, folios) {
+  const conCoords = new Map(destinos.map((d) => [norm(d.nombre), d]));
+  const pendientes = [...new Set(folios.filter((f) => !esUM(f) && f.estatus !== 'ENTREGADO').flatMap(lugaresDe))].filter((l) => !conCoords.has(norm(l))).sort();
+  const filas = destinos.slice().sort((a, b) => a.nombre.localeCompare(b.nombre)).map((d) => ({ nombre: d.nombre, d })).concat(pendientes.map((nombre) => ({ nombre, d: null })));
+  const guardar = async (nombre, d, valor, celda) => {
+    const p = leerCoordenadas(valor);
+    if (!p) { toast(esLigaCorta(valor) ? 'Esa liga corta no trae la ubicación: ábrela y copia la liga larga de la barra de direcciones.' : 'Pega la liga de Google Maps (la larga) o escribe lat, lng.', true); return; }
+    try { await API.guardarEn('destinos', d ? d.id : null, { nombre, lat: p.lat, lng: p.lng }); mount(celda, h('span', { class: 'ok' }, '✓ ' + p.lat.toFixed(5) + ', ' + p.lng.toFixed(5))); toast('Ubicación guardada para ' + nombre + '.'); } catch (x) { err(x); }
+  };
+  return h('section', { class: 'tarjeta' }, h('h2', null, 'Destinos Nacionales'),
+    h('p', { class: 'gris chico' }, 'Sucursales, bodegas y obras de los folios Nacionales. Pega la liga de Google Maps una vez y se reutiliza para el Monitoreo. ' + (pendientes.length ? pendientes.length + ' sin ubicación.' : '')),
+    h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Destino', 'Ubicación', 'Liga de Google Maps o lat, lng', ''].map((t) => h('th', null, t)))),
+      h('tbody', null, filas.length ? filas.map(({ nombre, d }) => {
+        const celda = h('td', null, d ? h('span', { class: 'ok' }, '✓ ' + Number(d.lat).toFixed(5) + ', ' + Number(d.lng).toFixed(5)) : h('span', { class: 'gris' }, 'Sin ubicación'));
+        return h('tr', null, h('td', null, nombre), celda,
+          h('td', null, entrada({ placeholder: 'https://www.google.com/maps/…', 'aria-label': 'Ubicación de ' + nombre, onchange: (e) => guardar(nombre, d, e.target.value.trim(), celda) })),
+          h('td', null, d ? h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar ' + nombre + '?')) { try { await API.borrarDe('destinos', d.id); catalogos().catch(fallo); } catch (x) { err(x); } } } }, 'Borrar') : null));
+      }) : h('tr', null, h('td', { colspan: 4, class: 'gris centro' }, 'Sin destinos.'))))));
+}
+/* Pesos, embalajes y estibas (referencia para revisar el material de cada folio). */
+function seccionEmbalajes() {
+  const cuerpo = h('tbody'), buscar = entrada({ type: 'search', placeholder: 'Buscar formato (60*120, PRC, SODIMAC…)', 'aria-label': 'Buscar formato' });
+  const pintar = () => {
+    const q = norm(buscar.value);
+    mount(cuerpo, EMBALAJES.filter((e) => !q || norm(e.formato).includes(q)).map((e) => h('tr', null, h('td', null, h('b', null, e.formato)), h('td', { class: 'num' }, String(e.piezas_caja)),
+      h('td', { class: 'num' }, String(e.m2_caja)), h('td', { class: 'num' }, String(e.cajas_tarima)), h('td', { class: 'num' }, String(e.m2_tarima)),
+      h('td', { class: 'num' }, e.kg_caja_min + ' – ' + e.kg_caja_max), h('td', { class: 'num' }, kg(e.kg_tarima_max)), h('td', null, e.tarima), h('td', { class: 'num' }, e.altura_cm + ' cm'), h('td', { class: 'num' }, String(e.estiba)))));
+  };
+  buscar.addEventListener('input', pintar);
+  pintar();
+  return h('section', { class: 'tarjeta' }, h('h2', null, 'Pesos, embalajes y estibas'),
+    h('p', { class: 'gris chico' }, REVISION + '. Con esta tabla se revisan tarimas, restos y kilos de cada partida del acopio.'),
+    h('div', { class: 'filtros' }, buscar),
+    h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null,
+      ['Formato', 'Pz/caja', 'm²/caja', 'Cajas/tarima', 'm²/tarima', 'Kg por caja', 'Kg máx. tarima', 'Tarima (cm)', 'Altura', 'Estiba'].map((t) => h('th', null, t)))), cuerpo)),
+    h('details', { class: 'desglose' }, h('summary', null, 'Adhesivos: paquetes por tarima completa (' + ADHESIVOS.length + ')'),
+      h('p', { class: 'gris chico' }, 'Los junteadores vienen en máster pack de 4; tarima completa = 36 cajas (144 paquetes).'),
+      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['SKU', 'Descripción', 'Paquetes/tarima'].map((t) => h('th', null, t)))),
+        h('tbody', null, ADHESIVOS.map((a) => h('tr', null, h('td', null, a.sku), h('td', null, a.descripcion), h('td', { class: 'num' }, String(a.paquetes_tarima)))))))));
 }
 
 /* ================================================================== ALERTAS */
@@ -588,12 +698,12 @@ async function config() {
   const nombre = entrada({ value: o.nombre }), coord = entrada({ value: o.lat + ', ' + o.lng });
   const puente = entrada({ type: 'url', value: gps.puente || '', placeholder: 'https://…cloudfunctions.net/samsara' });
   const g1 = h('button', { class: 'btn primario' }, 'Guardar origen'), g2 = h('button', { class: 'btn primario' }, 'Guardar puente');
-  g1.addEventListener('click', async () => { const p = leerCoordenadas(coord.value); if (!p) { toast('Coordenadas no válidas.', true); return; } try { await ocupado(g1, () => API.guardarConfig('general', { nombre: nombre.value.trim() || 'Origen', lat: p.lat, lng: p.lng })); toast('Origen guardado.'); } catch (e) { err(e); } });
+  g1.addEventListener('click', async () => { const p = leerCoordenadas(coord.value); if (!p) { toast('Pega la liga larga de Google Maps o escribe lat, lng.', true); return; } try { await ocupado(g1, () => API.guardarConfig('general', { nombre: nombre.value.trim() || 'Origen', lat: p.lat, lng: p.lng })); toast('Origen guardado.'); } catch (e) { err(e); } });
   g2.addEventListener('click', async () => { try { await ocupado(g2, () => API.guardarConfig('gps', { puente: puente.value.trim() })); toast(puente.value.trim() ? 'Puente guardado.' : 'Puente quitado: el Monitoreo queda simulado.'); } catch (e) { err(e); } });
   const secciones = [
     encabezado('Configuración'),
-    h('section', { class: 'tarjeta' }, h('h2', null, 'Origen de las rutas'), h('p', { class: 'gris chico' }, 'Desde dónde salen las unidades (Última Milla y simulación del Monitoreo). En Google Maps: clic derecho sobre el lugar y copia las coordenadas.'),
-      h('div', { class: 'rejilla' }, campo('Nombre', nombre), campo('Coordenadas (lat, lng)', coord)), h('div', { class: 'acciones' }, g1)),
+    h('section', { class: 'tarjeta' }, h('h2', null, 'Origen de las rutas'), h('p', { class: 'gris chico' }, 'Desde dónde salen las unidades (Última Milla y simulación del Monitoreo). Pega la liga de Google Maps del lugar o sus coordenadas.'),
+      h('div', { class: 'rejilla' }, campo('Nombre', nombre), campo('Liga de Google Maps o lat, lng', coord)), h('div', { class: 'acciones' }, g1)),
     h('section', { class: 'tarjeta' }, h('h2', null, 'GPS de Samsara'),
       h('p', { class: 'gris chico' }, 'El token de Samsara no puede ir en esta página (es pública). Va en un puente (Cloud Function) que guarda el token y responde la ubicación. Ver docs/samsara-puente en el repositorio. Si el puente falla o está vacío, el Monitoreo usa datos simulados.'),
       campo('URL del puente', puente), h('div', { class: 'acciones' }, g2))

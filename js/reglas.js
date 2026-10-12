@@ -63,5 +63,22 @@ export function revisarChecklist(resp) {
   return { contestado, pasa: contestado && reprobados.length === 0, reprobados };
 }
 
-const norm = (s) => String(s === null || s === undefined ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+/* Coordenadas desde texto: «20.67, -103.35» o una liga larga de Google Maps (…/@20.67,-103.35,15z, …!3d20.67!4d-103.35,
+   ?q=20.67,-103.35). Las ligas cortas (maps.app.goo.gl) no traen coordenadas: hay que abrirlas y copiar la liga larga. */
+export function coordenadasDeLiga(t) {
+  const s = decodeURIComponent(String(t || '')).replace(/\s+/g, ' ');
+  const ok = (a, b) => { const lat = Number(a), lng = Number(b); return Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && (lat || lng) ? { lat, lng } : null; };
+  let m = s.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/);
+  if (m) return ok(m[1], m[2]);
+  m = s.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
+  if (m) return ok(m[1], m[2]);
+  m = s.match(/[?&](?:q|query|ll|destination|daddr|center)=(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/);
+  if (m) return ok(m[1], m[2]);
+  if (/^https?:/i.test(s.trim())) return null;
+  m = s.match(/(-?\d{1,2}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)/);
+  return m ? ok(m[1], m[2]) : null;
+}
+export const esLigaCorta = (t) => /^(https?:\/\/)?(maps\.app\.goo\.gl|goo\.gl\/maps)\//i.test(String(t || '').trim());
+
+const norm = (s) => String(s === null || s === undefined ? '' : s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
 export { norm };
