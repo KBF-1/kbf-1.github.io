@@ -140,6 +140,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .desglose summary { cursor: pointer; font-weight: 600; color: var(--naranja-osc); padding: 4px 0; }
 .tabla.material td { vertical-align: top; }
 .tabla tr.alerta td { background: var(--rojo-bg); }
+.espejo { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 .ok { color: var(--verde); font-weight: 600; }
 .ubicacion { display: grid; gap: 4px; min-width: 260px; }
 .fila-ub { display: flex; gap: 6px; }

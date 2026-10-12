@@ -44,7 +44,9 @@ a las 12 horas de entrar.
 | Se guarda | Destinos de envío y **material partida por partida** (producto, SKU, lote, OC, cantidad, tarimas, restos, kg, m²) | Dirección, quién recibe, teléfonos, liga de Google Maps, descarga, observaciones, peso y metros |
 | Ubicación | Catálogos › Destinos Nacionales (liga de Maps o lat, lng) | Del Cuadro de Envío; si la liga es corta, se abre y se pega la liga larga |
 | Ruta | — | Última Milla (orden de entregas) |
-| Despacho (Transporte) | Transportista externo: **tarifa** negociada; **sin checklist** pre-salida | Unidad propia: **checklist** pre-salida de 8 puntos; tarifa **opcional** («No aplica tarifa») |
+| Flota | Unidades de **transportistas externos** | Unidades de **reparto propias** (y alguna contratada) |
+| GPS | **Cuenta espejo** del transportista (Catálogos › Transportistas: plataforma, liga, usuario y contraseña) y, si la mandan, liga de rastreo del viaje; en Monitoreo la posición es ESTIMADA | **Samsara** (o simulado si falla) |
+| Despacho (Transporte) | **Tarifa** negociada; **sin checklist** pre-salida | **Checklist** pre-salida de 8 puntos; unidad propia sin tarifa (automático), contratada con tarifa |
 
 Cada partida del acopio se revisa contra **Pesos, Embalajes y Estibas (AN-GCT-13 Rev. 16)** y el embalaje de adhesivos
 (`js/embalajes-datos.js`): formato, cajas por tarima, tarima, altura, estiba y rango de kilos esperado; marca las partidas fuera de rango.
@@ -79,7 +81,7 @@ Mientras tanto, todo el Monitoreo funciona con datos simulados.
 ## Colecciones
 
 `lc_folios` (+ `historial`), `lc_pantalla`, `lc_despachos`, `lc_unidades`, `lc_destinos`, `lc_rutas`, `lc_alertas`, `lc_usuarios` (correo → área),
-`lc_config` (`general` = origen, `gps` = puente).
+`lc_config` (`general` = origen, `gps` = puente, `transportistas` = transportistas externos y su cuenta espejo).
 
 ## Pruebas
 
