@@ -1,7 +1,7 @@
 /* Acceso a Firebase (colecciones lc_). Las reglas de Firestore repiten cada permiso en el servidor:
    ocultar un botón aquí no es lo que protege los datos. */
-import * as fb from './firebase-sdk.js?v=14';
-import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=14';
+import * as fb from './firebase-sdk.js?v=15';
+import { ESTATUS_OPERACION, docsCompletos, idFolio } from './reglas.js?v=15';
 
 const CFG = window.LC_CONFIG;
 const params = new URLSearchParams(location.search);
@@ -153,7 +153,7 @@ export async function crearFolios(grupos) {
           observaciones: txt(e.observaciones, 1000), descarga: txt(e.descarga, 20), embarque: txt(e.embarque, 30), orden: txt(e.orden, 30), factura: txt(e.factura, 30),
           flete_directo: !!e.flete_directo, gran_formato: !!e.gran_formato, adhesivos: !!e.adhesivos, almacen_distinto: !!e.almacen_distinto } : null,
         material: (g.material || []).slice(0, 300).map((m) => ({ destino: txt(m.destino, 30), orden: txt(m.orden, 30), sku: txt(m.sku, 40), producto: txt(m.producto),
-          formato: txt(m.formato, 60), cantidad: Number(m.cantidad) || 0, um: txt(m.um, 10), tarimas: Number(m.tarimas) || 0, restos: Number(m.restos) || 0,
+          formato: txt(m.formato, 60), cantidad: Number(m.cantidad) || 0, um: txt(m.um, 10), cajas_tarima: Number(m.cajas_tarima) || 0, tarimas: Number(m.tarimas) || 0, restos: Number(m.restos) || 0,
           kg: Number(m.kg) || 0, m2: Number(m.m2) || 0, lote: txt(m.lote, 30), oc: txt(m.oc, 60) })),
         folio: g.folio, cliente: g.cliente, destino: g.destino, hojas: g.hojas || [],
         tarimas: Number(g.tarimas) || 0, resto: Number(g.resto) || 0, peso_kg: Number(g.peso_kg) || 0, tipo_unidad: g.tipo_unidad,

@@ -1,13 +1,13 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
-import * as API from './datos.js?v=14';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=14';
-import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=14';
-import { leerLibro, interpretar, combinar } from './acopio.js?v=14';
-import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara, unirTransportista } from './catalogos.js?v=14';
-import { planear } from './ruta.js?v=14';
-import { ubicacion } from './gps.js?v=14';
-import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=14';
+import * as API from './datos.js?v=15';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=15';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=15';
+import { leerLibro, interpretar, combinar } from './acopio.js?v=15';
+import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara, unirTransportista } from './catalogos.js?v=15';
+import { planear } from './ruta.js?v=15';
+import { ubicacion } from './gps.js?v=15';
+import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=15';
 
 const CFG = window.LC_CONFIG;
 const main = document.getElementById('main'), nav = document.getElementById('nav'), cuenta = document.getElementById('cuenta');
@@ -203,6 +203,8 @@ async function borrarFolio(f, btn) {
     irA(location.hash.slice(1));
   } catch (e) { err(e); }
 }
+/* «26 tarimas + 3 cj»: tarimas completas y restos (cajas que no llenan tarima). */
+const tarimasTxt = (f) => String(f.tarimas || 0) + (Number(f.resto) ? ' + ' + f.resto + ' cj' : '');
 const dato = (t, v) => h('div', { class: 'dato' }, h('span', null, t), h('b', null, v));
 /* Datos de entrega de Última Milla: dirección, quién recibe, teléfonos, descarga y liga de Google Maps. */
 const direccion = (e) => [[e.calle, e.no_ext && 'No. ' + e.no_ext, e.no_int && 'Int. ' + e.no_int].filter(Boolean).join(' '), e.colonia && 'Col. ' + e.colonia,
@@ -230,7 +232,8 @@ function tablaMaterial(material) {
     const difTar = e && !e.adhesivo && r.tarimas_calc !== undefined && (r.tarimas_calc !== m.tarimas || r.restos_calc !== m.restos);
     return h('tr', { class: r.fuera_de_rango ? 'alerta' : '' },
       h('td', null, m.destino || '—'), h('td', null, h('b', null, m.producto), h('br'), h('small', { class: 'gris' }, [m.sku, m.lote && 'lote ' + m.lote, m.oc && 'OC ' + m.oc].filter(Boolean).join(' · '))),
-      h('td', { class: 'num' }, String(m.cantidad) + ' ' + (m.um || '')), h('td', { class: 'num' }, String(m.tarimas)), h('td', { class: 'num' }, m.restos ? String(m.restos) : '—'),
+      h('td', { class: 'num' }, String(m.cantidad) + ' ' + (m.um || ''), m.cajas_tarima ? [h('br'), h('small', { class: 'gris' }, m.cajas_tarima + ' por tarima')] : null),
+      h('td', { class: 'num' }, String(m.tarimas)), h('td', { class: 'num' }, m.restos ? h('b', null, String(m.restos)) : '—'),
       h('td', { class: 'num' }, kg(m.kg)), h('td', { class: 'num' }, m.m2 ? String(m.m2) : '—'),
       h('td', { class: 'chico' }, !e ? h('span', { class: 'gris' }, 'Sin formato en la tabla')
         : e.adhesivo ? [e.paquetes_tarima + ' paquetes por tarima']
@@ -281,7 +284,7 @@ async function ventas() {
     h('section', { class: 'tarjeta' }, h('h2', null, 'Folios'),
       tabla(lista, [
         ['Folio', (f) => h('b', null, f.folio)], ['Envío', envioChip], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
-        ['Tarimas', (f) => String(f.tarimas), 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'], ['Tipo', (f) => f.tipo_unidad], ['Docs', docsChip, 'centro'],
+        ['Tarimas', tarimasTxt, 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'], ['Tipo', (f) => f.tipo_unidad], ['Docs', docsChip, 'centro'],
         ['Estatus', (f) => pill(f.estatus)], ['Alta', (f) => fecha(f.creado)]
       ], ficha)));
 }
@@ -370,7 +373,7 @@ async function operacion() {
     contadores(lista, ESTATUS_OPERACION),
     h('section', { class: 'tarjeta' }, tabla(lista, [
       ['Folio', (f) => h('b', null, f.folio)], ['Envío', envioChip], ['Cliente', (f) => f.cliente], ['Destino', (f) => f.destino],
-      ['Tarimas', (f) => String(f.tarimas), 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'],
+      ['Tarimas', tarimasTxt, 'num'], ['Peso', (f) => kg(f.peso_kg), 'num'],
       ['Documentos', (f) => h('div', { class: 'docs-check' }, DOCUMENTOS.map(([k, n]) => h('label', null,
         h('input', { type: 'checkbox', checked: !!(f.docs && f.docs[k]), disabled: f.estatus === 'LISTO' && f.docs[k], title: f.estatus === 'LISTO' ? 'Para quitar un documento, primero regresa el folio de Listo' : null,
           onchange: async (e) => { try { await API.marcarDocumento(f, k, e.target.checked); f.docs[k] = e.target.checked; await operacion().catch(fallo); } catch (x) { e.target.checked = !e.target.checked; err(x); } } }), n)))],
@@ -423,6 +426,7 @@ async function transporte() {
     const um = envio === 'ULTIMA_MILLA';
     const columnas = [
       ['Folio', (f) => h('b', null, f.folio)], ['Cliente', (f) => (um && f.entrega && f.entrega.recibe) || f.cliente], ['Destino', (f) => f.destino],
+      ['Tarimas', tarimasTxt, 'num'],
       ['Peso', (f) => h('span', null, kg(f.peso_kg), h('br'), h('small', { class: 'gris' }, f.tipo_unidad)), 'num'],
       ['Transportista', (f) => f.transportista ? h('span', null, f.transportista, h('br'), h('small', { class: 'gris' }, f.unidad)) : h('span', { class: 'gris' }, 'Sin asignar')],
       ['Cita', (f) => f.cita ? fecha(f.cita) + (f.anden ? ' · A' + f.anden : '') : '—'],
@@ -516,7 +520,7 @@ function panelDespacho(f, unidades, d, transportistas, cat) {
   }
 
   const dlg = modal('Despacho ' + (um ? 'Última Milla' : 'Nacional') + ' · ' + f.folio,
-    h('div', { class: 'ficha' }, dato('Cliente', f.cliente), dato('Destino', f.destino || '—'), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad), dato('Tarimas', String(f.tarimas)), dato('Documentos', docsAvance(f.docs) + '/3'), dato('Estatus', pill(f.estatus))),
+    h('div', { class: 'ficha' }, dato('Cliente', f.cliente), dato('Destino', f.destino || '—'), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad), dato('Tarimas', tarimasTxt(f)), dato('Documentos', docsAvance(f.docs) + '/3'), dato('Estatus', pill(f.estatus))),
     f.entrega ? [h('h3', null, 'Entrega (Última Milla)'), bloqueEntrega(f)] : null,
     !um ? bloqueCliente(clientePara(cat.clientes, f)) : null,
     h('h3', null, 'Asignación'),

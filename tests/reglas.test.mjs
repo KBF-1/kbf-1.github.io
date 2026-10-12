@@ -186,3 +186,17 @@ test('Catálogos de Nacional (Seguimiento + Fletes)', async () => {
   assert.equal(tarifaPara(r.tarifas, ['Saltillo', 'Monterrey.']).tarifa, 600); // varias paradas: la más cara; sin importar puntos
   assert.equal(clientePara(r.clientes, { cliente: 'Interceramic Norte', paradas: [] }).customer, 'ANA PRUEBA');
 });
+test('Restos: 21 cajas con 20 por tarima = 1 tarima + 1 resto', () => {
+  const tit = ['Número orden', 'Destino envío', 'Producto', 'Cant enviada', 'UM', 'Kg.', 'Destino', 'Factor Tarimas', 'Tarimas', 'Restos tarima - liso', 'Restos tarima - deco', 'Lis/Dec', 'Cliente', 'Nom Sucursal'];
+  const fila = (o) => tit.map((t) => (o[t] === undefined ? '' : o[t]));
+  const base = [['FORMATO DE ACOPIO'], ['Folio:', 777], [], [], [], tit,
+    fila({ 'Número orden': 1, 'Destino envío': 50, Producto: 'PISO PRUEBA 60*60 RECT 1.44 MT2/36 CJ', 'Cant enviada': 21, UM: 'CJ', 'Kg.': 630, Destino: 'LEON', 'Factor Tarimas': 20, Tarimas: 0, 'Restos tarima - liso': 0, 'Lis/Dec': 'Lis', Cliente: 'X', 'Nom Sucursal': 'X LEON' }),
+    fila({ 'Número orden': 2, 'Destino envío': 50, Producto: 'DECORADO PRUEBA', 'Cant enviada': 7, UM: 'CJ', 'Kg.': 70, Destino: 'LEON', 'Factor Tarimas': 40, 'Lis/Dec': 'Dec', Cliente: 'X', 'Nom Sucursal': 'X LEON' }),
+    fila({ 'Número orden': 3, 'Destino envío': 50, Producto: 'SIN FACTOR 80*80', 'Cant enviada': 5, UM: 'CJ', 'Kg.': 50, Destino: 'LEON', Tarimas: 1, 'Restos tarima - liso': 2, 'Lis/Dec': 'Lis', Cliente: 'X', 'Nom Sucursal': 'X LEON' })];
+  const { grupos, avisos } = interpretar({ Base: base });
+  const g = grupos[0];
+  assert.deepEqual(g.material.map((m) => [m.tarimas, m.restos]), [[1, 1], [0, 7], [1, 2]]);
+  assert.equal(g.tarimas, 2); assert.equal(g.resto, 10);
+  assert.deepEqual([g.paradas[0].restos_liso, g.paradas[0].restos_deco], [3, 7]);
+  assert.ok(avisos.some((a) => /se calcularon con las cajas por tarima/.test(a)));
+});

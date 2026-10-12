@@ -1,7 +1,8 @@
 /* Formato de Acopio (.xlsx / .xlsm): lee las hojas Base, CB360 y Exhibición sin librerías, separa por cliente y destino,
    y calcula tarimas, resto de tarima y peso. Los títulos de columna se buscan por nombre (no por posición), así que el
    formato puede mover columnas. Todo lo calculado se muestra antes de crear los folios para corregirlo a mano. */
-import { combinarFolios, tarimas, tipoUnidad, redondeo, norm, coordenadasDeLiga } from './reglas.js?v=14';
+import { combinarFolios, tarimas, tipoUnidad, redondeo, norm, coordenadasDeLiga } from './reglas.js?v=15';
+import { embalajeDe } from './embalajes.js?v=15';
 
 export const HOJAS = [['BASE', 'Base'], ['CB360', 'CB360'], ['EXHIBICION', 'Exhibición']];
 
@@ -176,7 +177,7 @@ function interpretarCesantoni(hojas) {
   const t = filaTitulos(base, ['DESTINO ENVIO', 'KG.', 'TARIMAS']), m = t.m;
   const g = (f, k) => (m[k] === undefined ? '' : f[m[k]]);
   const paradas = new Map(), clientes = new Set(), pedidos = new Set(), material = [];
-  let partidas = 0;
+  let partidas = 0, corregidas = 0;
   for (let i = t.fila + 1; i < base.length; i++) {
     const f = base[i] || [];
     const codigo = texto(g(f, 'DESTINO ENVIO')), kgs = num(g(f, 'KG.'));
@@ -192,13 +193,26 @@ function interpretarCesantoni(hojas) {
     }
     const p = paradas.get(codigo);
     const prod = texto(g(f, 'PRODUCTO')) || [texto(g(f, 'DESCRIPCION 1')), texto(g(f, 'LINEA DESCRIPCION 2'))].filter(Boolean).join(' ');
-    material.push({ destino: codigo, orden: texto(g(f, 'NUMERO ORDEN')), sku: texto(g(f, '2º Nº ARTICULO')) || texto(g(f, '2O NO ARTICULO')), producto: prod,
-      formato: texto(g(f, 'FORMATO')), cantidad: num(g(f, 'CANT ENVIADA')) || num(g(f, 'CANTIDAD ENVIADA')), um: texto(g(f, 'UM')),
-      tarimas: num(g(f, 'TARIMAS')), restos: num(g(f, 'RESTOS TARIMA - LISO')) + num(g(f, 'RESTOS TARIMA - DECO')), kg: redondeo(kgs, 2), m2: redondeo(num(g(f, 'MTS')), 2),
+    const sku = texto(g(f, '2º Nº ARTICULO')) || texto(g(f, '2O NO ARTICULO')), cantidad = num(g(f, 'CANT ENVIADA')) || num(g(f, 'CANTIDAD ENVIADA')), um = texto(g(f, 'UM'));
+    // Tarimas completas y restos (cajas que no llenan tarima): cantidad ÷ cajas por tarima. Si una tarima lleva 20 cajas y piden 21,
+    // es 1 tarima + 1 resto. Las cajas por tarima salen de «Factor Tarimas» del acopio o, si no viene, de Pesos y Embalajes.
+    const emb = embalajeDe({ sku, producto: prod });
+    const factor = num(g(f, 'FACTOR TARIMAS')) || (emb ? emb.cajas_tarima || emb.paquetes_tarima || 0 : 0);
+    let tar = num(g(f, 'TARIMAS')), resto = num(g(f, 'RESTOS TARIMA - LISO')) + num(g(f, 'RESTOS TARIMA - DECO'));
+    if (factor > 0 && cantidad > 0 && (!um || /^(CJ|CAJA|PQ|PAQ|SA|SACO)/i.test(um))) {
+      const calcT = Math.floor(cantidad / factor + 1e-9), calcR = redondeo(cantidad - calcT * factor, 2);
+      if (calcT !== tar || calcR !== resto) corregidas++;
+      tar = calcT; resto = calcR;
+    }
+    const deco = /^DEC/i.test(texto(g(f, 'LIS/DEC'))) || (!texto(g(f, 'LIS/DEC')) && num(g(f, 'RESTOS TARIMA - DECO')) > 0);
+    material.push({ destino: codigo, orden: texto(g(f, 'NUMERO ORDEN')), sku, producto: prod,
+      formato: texto(g(f, 'FORMATO')), cantidad, um, cajas_tarima: factor || 0,
+      tarimas: tar, restos: resto, kg: redondeo(kgs, 2), m2: redondeo(num(g(f, 'MTS')), 2),
       lote: texto(g(f, 'Nº LOTE /SERIE')), oc: texto(g(f, 'OC CLIENTE')) });
-    p.tarimas += num(g(f, 'TARIMAS')); p.restos_liso += num(g(f, 'RESTOS TARIMA - LISO')); p.restos_deco += num(g(f, 'RESTOS TARIMA - DECO'));
+    p.tarimas += tar; if (deco) p.restos_deco += resto; else p.restos_liso += resto;
     p.peso_kg += kgs; p.m2 += num(g(f, 'MTS')); p.partidas++;
   }
+  if (corregidas) avisos.push(corregidas + ' partida(s) con tarimas o restos distintos a los del acopio: se calcularon con las cajas por tarima (cantidad ÷ cajas por tarima). Revisa el material.');
   const lista = [...paradas.values()].map((p) => Object.assign(p, { peso_kg: redondeo(p.peso_kg, 2), m2: redondeo(p.m2, 2), tarimas: redondeo(p.tarimas, 2) }));
   if (!lista.length) avisos.push('La hoja Base no trae partidas con destino y kilos.');
   const pesoBase = lista.reduce((s, p) => s + p.peso_kg, 0);
