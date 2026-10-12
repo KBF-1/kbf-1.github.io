@@ -17,71 +17,72 @@ const D = (n, id) => fb.doc(db, n, id);
 const ahora = () => new Date().toISOString();
 const lista = (snap) => snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
 
-/* ------------------------------------------------------------------ sesión */
-let sesion = null; // { uid, area }
+/* ------------------------------------------------------------------ sesión
+   Se entra con el correo: Firebase manda una liga al buzón y con un clic queda la sesión (12 horas). El área de cada persona
+   vive en lc_usuarios/{correo} y la asigna el Administrador. El administrador principal está fijo en las reglas. */
+let sesion = null; // { uid, correo, nombre, area }
 export const actual = () => sesion;
-const LLAVE_INICIO = 'lc-inicio-sesion';
+const LLAVE_INICIO = 'lc-inicio-sesion', LLAVE_CORREO = 'lc-correo-liga';
+const guardar = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* sin almacenamiento */ } };
+const leer = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+export const correoNormal = (c) => String(c || '').trim().toLowerCase();
 
 export function vencida() {
-  const t = Number(localStorage.getItem(LLAVE_INICIO) || 0);
+  const t = Number(leer(LLAVE_INICIO) || 0);
   return !t || Date.now() - t > CFG.sesionHoras * 3600000;
+}
+async function areaDe(u) {
+  const correo = correoNormal(u.email);
+  if (correo === CFG.administrador) return { area: 'admin', nombre: 'Administrador' };
+  const d = await fb.getDoc(D('lc_usuarios', correo));
+  if (!d.exists() || d.data().activo === false) return null;
+  return { area: d.data().area, nombre: d.data().nombre || '' };
 }
 export function alCambiar(fn) {
   return fb.onAuthStateChanged(auth, async (u) => {
     if (!u) { sesion = null; fn(null); return; }
-    const inicio = Date.parse((u.metadata && u.metadata.lastSignInTime) || '') || Number(localStorage.getItem(LLAVE_INICIO) || 0);
-    if (inicio) localStorage.setItem(LLAVE_INICIO, String(inicio));
+    const inicio = Date.parse((u.metadata && u.metadata.lastSignInTime) || '') || Number(leer(LLAVE_INICIO) || 0);
+    if (inicio) guardar(LLAVE_INICIO, String(inicio));
     if (vencida()) { await salir(); fn(null, 'Tu sesión duró más de ' + CFG.sesionHoras + ' horas. Vuelve a entrar.'); return; }
     try {
-      const a = await fb.getDoc(D('lc_areas', u.uid));
-      if (!a.exists()) { await salir(); fn(null, 'Esta cuenta no tiene un área asignada.'); return; }
-      sesion = { uid: u.uid, area: a.data().area };
+      const a = await areaDe(u);
+      if (!a) { const c = u.email; await salir(); fn(null, 'El correo ' + c + ' no tiene un área asignada. Pide al administrador que te dé de alta.'); return; }
+      sesion = { uid: u.uid, correo: correoNormal(u.email), nombre: a.nombre, area: a.area };
       fn(sesion);
     } catch (e) { await salir(); fn(null, amigable(e)); }
   });
 }
-export async function entrar(area, clave) {
-  const a = CFG.areas[area];
-  if (!a) throw new Error('Elige tu área.');
-  await fb.setPersistence(auth, fb.browserLocalPersistence);
-  localStorage.setItem(LLAVE_INICIO, String(Date.now()));
-  await fb.signInWithEmailAndPassword(auth, a.correo, clave);
+/* Paso 1: manda la liga al correo. */
+export async function mandarLiga(correo) {
+  correo = correoNormal(correo);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) throw new Error('Escribe tu correo completo.');
+  await fb.sendSignInLinkToEmail(auth, correo, { url: location.origin + location.pathname + (EMULADOR ? '?emu=1' : ''), handleCodeInApp: true });
+  guardar(LLAVE_CORREO, correo);
+  return correo;
 }
-export async function salir() { localStorage.removeItem(LLAVE_INICIO); await fb.signOut(auth); }
+/* Paso 2: al abrir la liga. Devuelve 'sin-liga', 'falta-correo' (se abrió en otro equipo) o 'ok'. */
+export function esLiga() { return fb.isSignInWithEmailLink(auth, location.href); }
+export async function completarLiga(correoEscrito) {
+  if (!esLiga()) return 'sin-liga';
+  const correo = correoNormal(correoEscrito || leer(LLAVE_CORREO));
+  if (!correo) return 'falta-correo';
+  await fb.setPersistence(auth, fb.browserLocalPersistence);
+  guardar(LLAVE_INICIO, String(Date.now()));
+  await fb.signInWithEmailLink(auth, correo, location.href);
+  guardar(LLAVE_CORREO, null);
+  history.replaceState(null, '', location.pathname + (EMULADOR ? '?emu=1' : '') + location.hash);
+  return 'ok';
+}
+export async function salir() { guardar(LLAVE_INICIO, null); await fb.signOut(auth); }
 
-/* Primera vez: crea las cuatro cuentas de área y deja al administrador con sesión. */
-export async function configurado() { return (await fb.getDoc(D('lc_config', 'inicio'))).exists(); }
-export async function configurar(claves) {
-  const uids = {};
-  for (const area of ['ventas', 'operacion', 'transporte']) {
-    const app2 = fb.initializeApp(CFG.firebase, 'alta-' + area + '-' + Date.now()), a2 = fb.getAuth(app2);
-    if (EMULADOR) fb.connectAuthEmulator(a2, 'http://127.0.0.1:9099', { disableWarnings: true });
-    uids[area] = (await crearOEntrar(a2, CFG.areas[area].correo, claves[area])).uid;
-    await fb.signOut(a2);
-  }
-  await fb.setPersistence(auth, fb.browserLocalPersistence);
-  localStorage.setItem(LLAVE_INICIO, String(Date.now()));
-  uids.admin = (await crearOEntrar(auth, CFG.areas.admin.correo, claves.admin)).uid;
-  const b = fb.writeBatch(db);
-  Object.keys(uids).forEach((area) => b.set(D('lc_areas', uids[area]), { area, creado: ahora() }));
-  b.set(D('lc_config', 'inicio'), { fecha: ahora() });
-  await b.commit();
+/* Usuarios (solo Administrador). */
+export async function usuarios() { return lista(await fb.getDocs(C('lc_usuarios'))).sort((a, b) => a.id.localeCompare(b.id)); }
+export async function guardarUsuario(correo, datos) {
+  correo = correoNormal(correo);
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) throw new Error('Correo no válido.');
+  await fb.setDoc(D('lc_usuarios', correo), { nombre: String(datos.nombre || '').trim(), area: datos.area, activo: datos.activo !== false, actualizado: ahora(), por: sesion.correo });
 }
-async function crearOEntrar(a, correo, clave) {
-  try { return (await fb.createUserWithEmailAndPassword(a, correo, clave)).user; }
-  catch (e) {
-    if (e.code !== 'auth/email-already-in-use') throw e;
-    return (await fb.signInWithEmailAndPassword(a, correo, clave)).user; // un intento anterior se quedó a medias
-  }
-}
-/* Cambia la contraseña de un área (se necesita la actual). */
-export async function cambiarClave(area, actualClave, nueva) {
-  const app2 = fb.initializeApp(CFG.firebase, 'clave-' + Date.now()), a2 = fb.getAuth(app2);
-  if (EMULADOR) fb.connectAuthEmulator(a2, 'http://127.0.0.1:9099', { disableWarnings: true });
-  const u = (await fb.signInWithEmailAndPassword(a2, CFG.areas[area].correo, actualClave)).user;
-  await fb.updatePassword(u, nueva);
-  await fb.signOut(a2);
-}
+export async function borrarUsuario(correo) { await fb.deleteDoc(D('lc_usuarios', correoNormal(correo))); }
 
 /* ------------------------------------------------------------------ folios */
 export async function folios() { return lista(await fb.getDocs(C('lc_folios'))); }
@@ -90,7 +91,7 @@ export async function historial(id) {
   return lista(await fb.getDocs(fb.collection(db, 'lc_folios', id, 'historial'))).sort((a, b) => (a.fecha < b.fecha ? 1 : -1));
 }
 function bitacora(b, id, texto) {
-  b.set(fb.doc(fb.collection(db, 'lc_folios', id, 'historial')), { fecha: ahora(), area: sesion.area, texto });
+  b.set(fb.doc(fb.collection(db, 'lc_folios', id, 'historial')), { fecha: ahora(), area: sesion.area, por: sesion.correo, texto });
 }
 
 /* Pantalla del almacén: copia pública del folio en lc_pantalla, sin direcciones, teléfonos, material ni nombres de clientes
@@ -138,7 +139,7 @@ export async function crearFolios(grupos) {
       };
       tx.set(ref, datos);
       tx.set(D('lc_pantalla', id), publico(Object.assign({ id }, datos)));
-      tx.set(fb.doc(fb.collection(db, 'lc_folios', id, 'historial')), { fecha: ahora(), area: sesion.area, texto: 'Alta del folio (Recibido)' });
+      tx.set(fb.doc(fb.collection(db, 'lc_folios', id, 'historial')), { fecha: ahora(), area: sesion.area, por: sesion.correo, texto: 'Alta del folio (Recibido)' });
       return true;
     });
     (ok ? creados : repetidos).push(g.folio);
@@ -227,7 +228,7 @@ export async function guardarConfig(id, datos) { await fb.setDoc(D('lc_config', 
 
 /* ------------------------------------------------------------------ alertas (el correo está simulado: solo se registra) */
 function alertaEn(b, tipo, f, texto) {
-  b.set(fb.doc(C('lc_alertas')), { tipo, folio: f ? f.folio : '', folio_id: f ? f.id : '', texto, fecha: ahora(), area: sesion.area, leida: false, correo: 'simulado' });
+  b.set(fb.doc(C('lc_alertas')), { tipo, folio: f ? f.folio : '', folio_id: f ? f.id : '', texto, fecha: ahora(), area: sesion.area, por: sesion.correo, leida: false, correo: 'simulado' });
 }
 export async function alertas() { return lista(await fb.getDocs(C('lc_alertas'))).sort((a, b) => (a.fecha < b.fecha ? 1 : -1)); }
 export async function marcarLeida(id) { await fb.updateDoc(D('lc_alertas', id), { leida: true }); }
@@ -237,9 +238,11 @@ export async function tokenGps() { try { return auth.currentUser ? await auth.cu
 
 export function amigable(e) {
   const c = (e && e.code) || '', m = String((e && e.message) || e || '');
-  if (/wrong-password|invalid-credential|user-not-found|invalid-login/.test(c)) return 'Contraseña incorrecta.';
+  if (/invalid-action-code|expired-action-code/.test(c)) return 'La liga ya se usó o venció. Pide una nueva.';
+  if (/invalid-email/.test(c)) return 'Ese correo no coincide con el de la liga.';
+  if (/operation-not-allowed/.test(c)) return 'Falta activar «Vínculo de correo electrónico» en Firebase › Authentication.';
+  if (/unauthorized-continue-uri|unauthorized-domain/.test(c)) return 'Falta agregar este sitio en Firebase › Authentication › Authorized domains.';
   if (/too-many-requests/.test(c)) return 'Demasiados intentos. Espera unos minutos.';
-  if (/weak-password/.test(c)) return 'La contraseña debe tener al menos 6 caracteres.';
   if (/network|unavailable/.test(c)) return 'Sin conexión. Revisa tu internet y vuelve a intentar.';
   if (/permission-denied|PERMISSION_DENIED/.test(c + m)) {
     if (vencida()) return 'SESION: Tu sesión venció (' + CFG.sesionHoras + ' horas). Vuelve a entrar.';

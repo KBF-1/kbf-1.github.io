@@ -24,26 +24,40 @@ page.on('dialog', (d) => d.accept());
 const foto = async (n) => { if (SALIDA) await page.screenshot({ path: SALIDA + '/' + n + '.png', fullPage: true }); };
 const toast = async () => (await page.locator('.toast').allTextContents()).join(' | ');
 const esperarToast = async (texto) => { await page.locator('.toast', { hasText: texto }).first().waitFor({ timeout: 10000 }); };
-async function entrar(area, clave) {
+/* Entrar con la liga al correo: el emulador de Auth guarda las ligas en /oobCodes. */
+async function mandarLiga(correo) {
   await page.goto(BASE + EMU);
-  await page.getByRole('button', { name: area, exact: true }).click();
-  await page.locator('#clave').fill(clave);
-  await page.getByRole('button', { name: 'Entrar' }).click();
-  await page.locator('#nav a').first().waitFor();
+  await page.locator('#correo').fill(correo);
+  await page.getByRole('button', { name: 'Mandarme la liga' }).click();
+  await page.getByText('Revisa tu correo').waitFor();
+  const r = await (await fetch(`http://127.0.0.1:9099/emulator/v1/projects/${P}/oobCodes`)).json();
+  const c = r.oobCodes.filter((x) => x.email === correo && x.requestType === 'EMAIL_SIGNIN').pop();
+  const u = new URL(c.oobLink), destino = new URL(u.searchParams.get('continueUrl'));
+  ['mode', 'oobCode', 'apiKey', 'lang'].forEach((k) => { if (u.searchParams.get(k)) destino.searchParams.set(k, u.searchParams.get(k)); });
+  return destino.href;
 }
-async function salir() { await page.getByRole('button', { name: 'Cerrar sesión' }).click(); await page.getByRole('button', { name: 'Entrar' }).waitFor(); }
+async function entrar(correo) {
+  await page.goto(await mandarLiga(correo));
+  await page.locator('#nav a').first().waitFor({ timeout: 20000 });
+}
+async function salir() { await page.getByRole('button', { name: 'Cerrar sesión' }).click(); await page.getByRole('button', { name: 'Mandarme la liga' }).waitFor(); }
 async function ir(hash, titulo) { await page.goto(BASE + EMU + '#' + hash); await page.locator('main h1', { hasText: titulo }).waitFor(); await page.locator('main .tabla, main .unidades, main .alertas, main .tarjeta p.gris').first().waitFor(); }
 const menu = async () => (await page.locator('#nav a b').allTextContents()).map((t) => t.replace(/\d+$/, '').trim());
 
-console.log('Configuración inicial');
-await page.goto(BASE + EMU);
-await page.getByRole('heading', { name: 'Configuración inicial' }).waitFor();
-const claves = { Administrador: 'admin-123', Ventas: 'ventas-123', 'Operación': 'opera-123', Transporte: 'trans-123' };
-for (const [n, c] of Object.entries(claves)) await page.getByLabel('Contraseña de ' + n).fill(c);
-await page.getByRole('button', { name: 'Crear las cuatro áreas' }).click();
-await page.locator('#nav a').first().waitFor({ timeout: 20000 });
-check((await page.locator('.chip-area').textContent()) === 'Administrador', 'quedó con sesión de Administrador');
+console.log('Acceso por correo');
+await page.goto(await mandarLiga('nadie@cesantoni.com.mx'));
+await page.getByText('no tiene un área asignada').waitFor();
+check(true, 'correo sin área: no entra y lo explica');
+await entrar('jroman@cesantoni.com.mx');
+check((await page.locator('.chip-area').textContent()) === 'Administrador', 'jroman@cesantoni.com.mx entra como Administrador');
 check((await menu()).includes('Configuración'), 'Administrador ve Configuración');
+await ir('config', 'Configuración');
+for (const [c, n, a] of [['ventas@cesantoni.com.mx', 'Vendedor Uno', 'ventas'], ['opera@cesantoni.com.mx', 'Operador Uno', 'operacion'], ['Transporte@Cesantoni.com.mx', 'Trafico Uno', 'transporte']]) {
+  await page.getByLabel('Correo nuevo').fill(c); await page.getByLabel('Nombre de la persona').fill(n); await page.getByLabel('Área', { exact: true }).selectOption(a);
+  await page.getByRole('button', { name: 'Dar de alta' }).click();
+  await page.locator('td', { hasText: c.toLowerCase() }).waitFor();
+}
+check(await page.locator('td', { hasText: 'transporte@cesantoni.com.mx' }).count() === 1, 'alta de usuarios con su área (correo en minúsculas)');
 
 console.log('Transporte: catálogo de unidades');
 await ir('catalogos', 'Catálogos');
@@ -58,7 +72,7 @@ check(await page.locator('td', { hasText: 'JAL1234' }).count() === 1, 'unidad gu
 await salir();
 
 console.log('Ventas');
-await entrar('Ventas', 'ventas-123');
+await entrar('ventas@cesantoni.com.mx');
 check(JSON.stringify(await menu()) === JSON.stringify(['Ventas', 'Alertas', 'Pantalla ↗']), 'Ventas solo ve Ventas + Alertas (+ liga a Pantalla)');
 await page.goto(BASE + EMU + '#transporte');
 await page.waitForTimeout(800);
@@ -101,6 +115,8 @@ await page.locator('.tabla tbody tr', { hasText: '7777/8888' }).first().click();
 await page.locator('.modal .paradas-t').waitFor();
 check(await page.locator('.modal .paradas-t tbody tr').count() === 2, 'la ficha del folio muestra sus 2 destinos de envío');
 check(await page.locator('.modal .material tbody tr').count() === 6, 'la ficha desglosa el material (6 partidas)');
+await page.locator('.modal .historial li', { hasText: 'ventas@cesantoni.com.mx' }).first().waitFor();
+check(true, 'el historial registra quién (correo), no solo el área');
 await page.locator('.modal .btn-x').click();
 // Cuadros de Envío (Última Milla)
 await page.locator('#acopio').setInputFiles([CUADRO, CUADRO2]);
@@ -115,7 +131,7 @@ await page.getByRole('button', { name: /^Todos/ }).click();
 await salir();
 
 console.log('Operación');
-await entrar('Operación', 'opera-123');
+await entrar('opera@cesantoni.com.mx');
 check(JSON.stringify(await menu()) === JSON.stringify(['Operación', 'Alertas', 'Pantalla ↗']), 'Operación solo ve Operación + Alertas');
 const fila = (f) => page.locator('.tabla tbody tr', { hasText: f });
 const opcionListo = fila('22001').locator('select option[value="LISTO"]');
@@ -145,7 +161,7 @@ await foto('02-operacion');
 await salir();
 
 console.log('Transporte');
-await entrar('Transporte', 'trans-123');
+await entrar('transporte@cesantoni.com.mx');
 check((await menu()).length === 9, 'Transporte ve todo (igual que Administrador)');
 await ir('transporte', 'Transporte');
 await page.locator('.tabla tbody tr', { hasText: '22001' }).click();

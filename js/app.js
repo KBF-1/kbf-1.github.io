@@ -22,7 +22,7 @@ const MENU = {
   ruta: ['Última Milla', 'Ruta más corta de reparto'],
   catalogos: ['Catálogos', 'Unidades y destinos'],
   alertas: ['Alertas', 'Avisos del sistema'],
-  config: ['Configuración', 'Origen, GPS y contraseñas']
+  config: ['Configuración', 'Usuarios, origen y GPS']
 };
 
 let sesion = null, temporizador = null;
@@ -41,62 +41,49 @@ setInterval(() => { if (sesion && API.vencida()) API.salir().then(() => toast('T
 
 async function pantallaAcceso(aviso) {
   nav.hidden = true; mount(cuenta);
-  mount(main, h('p', { class: 'gris' }, 'Cargando…'));
-  let listo = true;
-  try { listo = await API.configurado(); }
-  catch (e) {
-    // Sin permiso para leer lc_config/inicio = faltan las reglas «lc_» en Firebase (o no hay conexión).
-    if (/permission/i.test((e && e.code) || '')) aviso = 'Firebase no tiene publicadas las reglas de Control de Embarques (bloque «lc_» de firestore.rules). Publícalas y recarga la página.';
-    else if (!aviso) aviso = 'No se pudo revisar la configuración (¿sin conexión?).';
+  // ¿Se abrió la liga que llegó al correo?
+  if (API.esLiga()) {
+    mount(main, h('div', { class: 'tarjeta acceso' }, h('p', { class: 'gris' }, 'Entrando…')));
+    try {
+      const r = await API.completarLiga();
+      if (r === 'ok') return; // onAuthStateChanged sigue
+      if (r === 'falta-correo') { confirmarCorreo(); return; }
+    } catch (e) { aviso = API.amigable(e); history.replaceState(null, '', location.pathname + location.search.replace(/[?&](apiKey|oobCode|mode|lang)=[^&]*/g, '')); }
   }
-  if (!listo) { configuracionInicial(); return; }
-  let area = localStorage.getItem('lc-area') || '';
-  const clave = entrada({ type: 'password', autocomplete: 'current-password', required: true, id: 'clave' });
-  const botones = h('div', { class: 'areas' }, ['ventas', 'operacion', 'transporte', 'admin'].map((k) =>
-    h('button', { type: 'button', class: 'area' + (k === area ? ' activa' : ''), 'aria-pressed': String(k === area), onclick: (e) => {
-      area = k; botones.querySelectorAll('.area').forEach((b) => { b.classList.remove('activa'); b.setAttribute('aria-pressed', 'false'); });
-      e.currentTarget.classList.add('activa'); e.currentTarget.setAttribute('aria-pressed', 'true'); clave.focus();
-    } }, CFG.areas[k].nombre)));
-  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Entrar');
+  let guardado = '';
+  try { guardado = localStorage.getItem('lc-ultimo-correo') || ''; } catch (e) { /* sin almacenamiento */ }
+  const correo = entrada({ type: 'email', autocomplete: 'email', required: true, id: 'correo', value: guardado, placeholder: 'nombre@cesantoni.com.mx' });
+  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Mandarme la liga');
+  const zona = h('div');
   const form = h('form', { class: 'tarjeta acceso', onsubmit: async (e) => {
     e.preventDefault();
-    if (!area) { toast('Elige tu área.', true); return; }
-    try { await ocupado(btn, () => API.entrar(area, clave.value), 'Entrando…'); localStorage.setItem('lc-area', area); }
-    catch (err) { toast(API.amigable(err), true); clave.select(); }
+    try {
+      const c = await ocupado(btn, () => API.mandarLiga(correo.value), 'Enviando…');
+      try { localStorage.setItem('lc-ultimo-correo', c); } catch (x) { /* sin almacenamiento */ }
+      mount(zona, h('div', { class: 'aviso ok-bg' }, h('b', null, 'Revisa tu correo (' + c + ').'), h('br'),
+        'Te llegó una liga de «noreply@proveedores-cesantoni.firebaseapp.com». Ábrela en esta misma computadora y entras directo. ',
+        'Si no la ves en unos minutos, busca en Correo no deseado o Cuarentena.'));
+    } catch (err) { toast(API.amigable(err), true); }
   } },
   h('h1', null, 'Control de Embarques'),
-  h('p', { class: 'gris' }, 'Elige tu área y escribe la contraseña de tu área. La sesión dura ' + CFG.sesionHoras + ' horas.'),
+  h('p', { class: 'gris' }, 'Escribe tu correo de trabajo y te mandamos una liga para entrar, sin contraseña. Tu área (Ventas, Operación o Transporte) se asigna a tu correo. La sesión dura ' + CFG.sesionHoras + ' horas.'),
   aviso ? h('p', { class: 'aviso mal' }, aviso) : null,
-  botones, campo('Contraseña', clave), btn,
-  h('p', { class: 'gris chico centro' }, h('a', { href: 'pantalla.html', target: '_blank', rel: 'noopener' }, 'Abrir la Pantalla del almacén'), ' (no pide contraseña)'));
+  campo('Correo', correo), btn, zona,
+  h('p', { class: 'gris chico centro' }, h('a', { href: 'pantalla.html', target: '_blank', rel: 'noopener' }, 'Abrir la Pantalla del almacén'), ' (no pide acceso)'));
   mount(main, form);
 }
-
-function configuracionInicial() {
-  const campos = {};
-  const filas = ['admin', 'ventas', 'operacion', 'transporte'].map((k) => {
-    campos[k] = entrada({ type: 'password', autocomplete: 'new-password', minlength: 6, required: true });
-    return campo('Contraseña de ' + CFG.areas[k].nombre, campos[k]);
-  });
-  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Crear las cuatro áreas');
+/* La liga se abrió en otro equipo o navegador: hay que confirmar el correo. */
+function confirmarCorreo() {
+  const correo = entrada({ type: 'email', autocomplete: 'email', required: true, id: 'correo' });
+  const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Entrar');
   mount(main, h('form', { class: 'tarjeta acceso', onsubmit: async (e) => {
     e.preventDefault();
-    const claves = {};
-    for (const k of Object.keys(campos)) {
-      claves[k] = campos[k].value;
-      if (claves[k].length < 6) { toast('Cada contraseña debe tener al menos 6 caracteres.', true); return; }
-    }
-    if (new Set(Object.values(claves)).size < 4) { toast('Usa una contraseña distinta para cada área.', true); return; }
-    try { await ocupado(btn, () => API.configurar(claves), 'Creando…'); localStorage.setItem('lc-area', 'admin'); toast('Listo. Entraste como Administrador.'); location.reload(); }
-    catch (err) { toast(API.amigable(err), true); }
-  } },
-  h('h1', null, 'Configuración inicial'),
-  h('p', null, 'Es la primera vez que se abre el sistema. Define la contraseña de cada área; después cada área entra con la suya.'),
-  h('div', { class: 'rejilla' }, filas), btn));
+    try { await ocupado(btn, () => API.completarLiga(correo.value), 'Entrando…'); } catch (err) { toast(API.amigable(err), true); }
+  } }, h('h1', null, 'Confirma tu correo'), h('p', { class: 'gris' }, 'Abriste la liga en otra computadora o navegador. Escribe el mismo correo al que llegó.'), campo('Correo', correo), btn));
 }
 
 function pintarCuenta() {
-  mount(cuenta, h('span', { class: 'chip-area' }, CFG.areas[sesion.area].nombre),
+  mount(cuenta, h('span', { class: 'quien', title: sesion.correo }, sesion.nombre && sesion.area !== 'admin' ? sesion.nombre : sesion.correo), h('span', { class: 'chip-area' }, CFG.areas[sesion.area].nombre),
     h('button', { class: 'btn chico', onclick: () => API.salir() }, 'Cerrar sesión'));
 }
 function pintarMenu(actual) {
@@ -180,7 +167,7 @@ async function ficha(f) {
     f.paradas && f.paradas.length ? [h('h3', null, 'Destinos de envío'), h('div', { class: 'tabla-scroll' }, tablaParadas(f.paradas))] : null,
     f.material && f.material.length ? [h('h3', null, 'Material (' + f.material.length + ' partidas)'), tablaMaterial(f.material)] : null,
     h('h3', null, 'Historial'), hist);
-  try { const r = await API.historial(f.id); mount(hist, r.length ? r.map((x) => h('li', null, h('b', null, fecha(x.fecha)), ' · ', CFG.areas[x.area] ? CFG.areas[x.area].nombre : x.area, ' — ', x.texto)) : h('li', { class: 'gris' }, 'Sin movimientos.')); }
+  try { const r = await API.historial(f.id); mount(hist, r.length ? r.map((x) => h('li', null, h('b', null, fecha(x.fecha)), ' · ', CFG.areas[x.area] ? CFG.areas[x.area].nombre : x.area, x.por ? ' (' + x.por + ')' : '', ' — ', x.texto)) : h('li', { class: 'gris' }, 'Sin movimientos.')); }
   catch (e) { mount(hist, h('li', { class: 'gris' }, API.amigable(e))); }
 }
 const dato = (t, v) => h('div', { class: 'dato' }, h('span', null, t), h('b', null, v));
@@ -679,6 +666,31 @@ function seccionEmbalajes() {
         h('tbody', null, ADHESIVOS.map((a) => h('tr', null, h('td', null, a.sku), h('td', null, a.descripcion), h('td', { class: 'num' }, String(a.paquetes_tarima)))))))));
 }
 
+/* Usuarios: cada correo con su área. Solo el Administrador. */
+async function seccionUsuarios() {
+  const lista = await API.usuarios();
+  const AREAS = ['ventas', 'operacion', 'transporte', 'admin'];
+  const correo = entrada({ type: 'email', placeholder: 'nombre@cesantoni.com.mx', 'aria-label': 'Correo nuevo' });
+  const nombre = entrada({ placeholder: 'Nombre', 'aria-label': 'Nombre de la persona' });
+  const area = selector(AREAS.map((k) => [k, CFG.areas[k].nombre]), 'ventas', { 'aria-label': 'Área' });
+  const agregar = h('button', { class: 'btn primario', type: 'submit' }, 'Dar de alta');
+  const recargar = () => irA('config');
+  return h('section', { class: 'tarjeta' }, h('h2', null, 'Usuarios'),
+    h('p', { class: 'gris chico' }, 'Cada persona entra con su correo y ve solo lo de su área (Transporte y Administrador ven todo). ' + CFG.administrador + ' siempre es Administrador. Si das de baja a alguien, su sesión deja de funcionar enseguida.'),
+    h('form', { class: 'alta-usuario', onsubmit: async (e) => {
+      e.preventDefault();
+      try { await ocupado(agregar, () => API.guardarUsuario(correo.value, { nombre: nombre.value, area: area.value })); toast('Alta de ' + correo.value.trim().toLowerCase() + ' en ' + CFG.areas[area.value].nombre + '.'); recargar(); } catch (x) { err(x); }
+    } }, correo, nombre, area, agregar),
+    h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Correo', 'Nombre', 'Área', 'Activo', ''].map((t) => h('th', null, t)))),
+      h('tbody', null, h('tr', null, h('td', null, h('b', null, CFG.administrador)), h('td', null, '—'), h('td', null, 'Administrador'), h('td', null, 'Siempre'), h('td')),
+        lista.filter((u) => u.id !== CFG.administrador).map((u) => h('tr', { class: u.activo === false ? 'apagado' : '' }, h('td', null, u.id), h('td', null, u.nombre || '—'),
+          h('td', null, selector(AREAS.map((k) => [k, CFG.areas[k].nombre]), u.area, { 'aria-label': 'Área de ' + u.id,
+            onchange: async (e) => { try { await API.guardarUsuario(u.id, { nombre: u.nombre, area: e.target.value, activo: u.activo !== false }); toast(u.id + ': ' + CFG.areas[e.target.value].nombre); } catch (x) { err(x); } } })),
+          h('td', null, h('input', { type: 'checkbox', checked: u.activo !== false, 'aria-label': 'Activo ' + u.id,
+            onchange: async (e) => { try { await API.guardarUsuario(u.id, { nombre: u.nombre, area: u.area, activo: e.target.checked }); toast(u.id + (e.target.checked ? ' activo.' : ' dado de baja.')); recargar(); } catch (x) { err(x); } } })),
+          h('td', null, h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar a ' + u.id + '?')) { try { await API.borrarUsuario(u.id); recargar(); } catch (x) { err(x); } } } }, 'Borrar'))))))));
+}
+
 /* ================================================================== ALERTAS */
 async function alertas() {
   const lista = await API.alertas();
@@ -686,7 +698,7 @@ async function alertas() {
   mount(main, encabezado('Alertas', 'Avisos automáticos del sistema. El envío por correo está simulado: se registra aquí, todavía no se manda.'),
     h('section', { class: 'tarjeta' }, lista.length ? h('ul', { class: 'alertas' }, lista.map((a) => h('li', { class: a.leida ? 'leida' : '' },
       h('div', null, h('span', { class: 'pill ' + (a.leida ? 'gris' : 'rojo') }, h('i'), TIPOS[a.tipo] || a.tipo), ' ', h('b', null, a.texto)),
-      h('div', { class: 'gris chico' }, fecha(a.fecha), ' · ', CFG.areas[a.area] ? CFG.areas[a.area].nombre : a.area, ' · correo: ', a.correo || 'simulado'),
+      h('div', { class: 'gris chico' }, fecha(a.fecha), ' · ', CFG.areas[a.area] ? CFG.areas[a.area].nombre : a.area, a.por ? ' (' + a.por + ')' : '', ' · correo: ', a.correo || 'simulado'),
       a.leida ? null : h('button', { class: 'btn chico', onclick: async () => { try { await API.marcarLeida(a.id); alertas().catch(fallo); } catch (e) { err(e); } } }, 'Marcar leída'))))
       : h('p', { class: 'gris' }, 'Sin alertas.')));
 }
@@ -708,16 +720,6 @@ async function config() {
       h('p', { class: 'gris chico' }, 'El token de Samsara no puede ir en esta página (es pública). Va en un puente (Cloud Function) que guarda el token y responde la ubicación. Ver docs/samsara-puente en el repositorio. Si el puente falla o está vacío, el Monitoreo usa datos simulados.'),
       campo('URL del puente', puente), h('div', { class: 'acciones' }, g2))
   ];
-  if (puede('admin')) {
-    const area = selector(['ventas', 'operacion', 'transporte', 'admin'].map((k) => [k, CFG.areas[k].nombre]), 'ventas');
-    const actualC = entrada({ type: 'password', autocomplete: 'off' }), nueva = entrada({ type: 'password', autocomplete: 'new-password', minlength: 6 });
-    const g3 = h('button', { class: 'btn primario' }, 'Cambiar contraseña');
-    g3.addEventListener('click', async () => {
-      if (nueva.value.length < 6) { toast('La nueva contraseña debe tener al menos 6 caracteres.', true); return; }
-      try { await ocupado(g3, () => API.cambiarClave(area.value, actualC.value, nueva.value)); toast('Contraseña de ' + CFG.areas[area.value].nombre + ' cambiada. Las sesiones abiertas siguen hasta que venzan.'); actualC.value = nueva.value = ''; } catch (e) { err(e); }
-    });
-    secciones.push(h('section', { class: 'tarjeta' }, h('h2', null, 'Contraseñas por área'),
-      h('div', { class: 'rejilla' }, campo('Área', area), h('span'), campo('Contraseña actual', actualC), campo('Contraseña nueva', nueva)), h('div', { class: 'acciones' }, g3)));
-  }
+  if (puede('admin')) secciones.splice(1, 0, await seccionUsuarios());
   mount(main, secciones);
 }

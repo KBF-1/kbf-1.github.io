@@ -10,12 +10,11 @@ window.LC_CONFIG = {
     messagingSenderId: '168248619956',
     appId: '1:168248619956:web:f3e1078e744512bdd538e1'
   },
-  /* Una cuenta de Firebase por área. Nadie escribe estos correos: en la pantalla de acceso solo se elige el área y su contraseña. */
+  /* Cada persona entra con su correo (liga al buzón). El área se asigna en Configuración › Usuarios.
+     Este correo siempre es Administrador (también está fijo en las reglas de Firestore). */
+  administrador: 'jroman@cesantoni.com.mx',
   areas: {
-    ventas:     { nombre: 'Ventas',     correo: 'ventas@logistica-cesantoni.local' },
-    operacion:  { nombre: 'Operación',  correo: 'operacion@logistica-cesantoni.local' },
-    transporte: { nombre: 'Transporte', correo: 'transporte@logistica-cesantoni.local' },
-    admin:      { nombre: 'Administrador', correo: 'admin@logistica-cesantoni.local' }
+    ventas: { nombre: 'Ventas' }, operacion: { nombre: 'Operación' }, transporte: { nombre: 'Transporte' }, admin: { nombre: 'Administrador' }
   },
   sesionHoras: 12,
   /* Punto de salida por omisión (se cambia en Configuración). */

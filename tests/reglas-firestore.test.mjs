@@ -4,11 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { initializeTestEnvironment, assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 
 const env = await initializeTestEnvironment({ projectId: 'proveedores-cesantoni', firestore: { rules: readFileSync(process.env.REGLAS || 'firestore.rules', 'utf8'), host: '127.0.0.1', port: 8080 } });
 const ahora = Math.floor(Date.now() / 1000);
-const como = (area, horas = 0) => env.authenticatedContext('u-' + area, { auth_time: ahora - horas * 3600 }).firestore();
+const CORREO = { ventas: 'ventas@cesantoni.com.mx', operacion: 'opera@cesantoni.com.mx', transporte: 'trafico@cesantoni.com.mx', admin: 'jroman@cesantoni.com.mx' };
+const como = (area, horas = 0, extra = {}) => env.authenticatedContext('u-' + area, { auth_time: ahora - horas * 3600, email: CORREO[area] || area, email_verified: true, ...extra }).firestore();
 const folio = (extra) => Object.assign({ folio: '100', cliente: 'Cliente', destino: 'León', hojas: ['Base'], tarimas: 2, resto: 0, peso_kg: 1000, tipo_unidad: 'SENCILLO',
   estatus: 'RECIBIDO', motivo: '', docs: { factura: false, carta_porte: false, remision: false }, transportista: '', unidad: '', cita: '', anden: '', salida: '', entregado: '',
   creado: 'x', actualizado: 'x', creado_por: 'ventas' }, extra);
@@ -17,8 +18,8 @@ test.before(async () => {
   await env.clearFirestore();
   await env.withSecurityRulesDisabled(async (c) => {
     const db = c.firestore();
-    for (const a of ['ventas', 'operacion', 'transporte', 'admin']) await setDoc(doc(db, 'lc_areas', 'u-' + a), { area: a });
-    await setDoc(doc(db, 'lc_config', 'inicio'), { fecha: 'x' });
+    for (const a of ['ventas', 'operacion', 'transporte']) await setDoc(doc(db, 'lc_usuarios', CORREO[a]), { area: a, activo: true });
+    await setDoc(doc(db, 'lc_usuarios', 'baja@cesantoni.com.mx'), { area: 'transporte', activo: false });
     await setDoc(doc(db, 'lc_folios', 'F1'), folio());
     await setDoc(doc(db, 'lc_despachos', 'F1'), { tarifa: 18500, operador: 'Juan', placas: 'ABC123' });
   });
@@ -89,33 +90,35 @@ test('Catálogos y configuración: solo Transporte y Administrador', async () =>
   await assertSucceeds(setDoc(doc(como('transporte'), 'lc_unidades', 'U1'), { nombre: 'x', capacidad_kg: 20000 }));
   await assertFails(getDoc(doc(como('ventas'), 'lc_config', 'gps')));
   await assertSucceeds(setDoc(doc(como('transporte'), 'lc_config', 'gps'), { puente: '' }));
-  await assertFails(setDoc(doc(como('admin'), 'lc_config', 'inicio'), { fecha: 'y' }));
 });
-test('Áreas: nadie se cambia de área; solo el Administrador', async () => {
-  await assertFails(updateDoc(doc(como('ventas'), 'lc_areas', 'u-ventas'), { area: 'admin' }));
-  await assertFails(setDoc(doc(como('ventas'), 'lc_areas', 'u-nuevo'), { area: 'admin' }));
-  await assertFails(setDoc(doc(env.authenticatedContext('intruso', { auth_time: ahora }).firestore(), 'lc_areas', 'intruso'), { area: 'admin' }));
-  await assertSucceeds(getDoc(doc(como('ventas'), 'lc_areas', 'u-ventas')));
-  await assertFails(getDoc(doc(como('ventas'), 'lc_areas', 'u-admin')));
+test('Usuarios por correo: solo el Administrador asigna áreas', async () => {
+  await assertFails(updateDoc(doc(como('ventas'), 'lc_usuarios', CORREO.ventas), { area: 'admin' }));
+  await assertFails(setDoc(doc(como('ventas'), 'lc_usuarios', 'otro@cesantoni.com.mx'), { area: 'admin', activo: true }));
+  await assertSucceeds(getDoc(doc(como('ventas'), 'lc_usuarios', CORREO.ventas)));
+  await assertFails(getDoc(doc(como('ventas'), 'lc_usuarios', CORREO.operacion)));
+  await assertSucceeds(setDoc(doc(como('admin'), 'lc_usuarios', 'nuevo@cesantoni.com.mx'), { area: 'ventas', activo: true, nombre: 'N' }));
+  await assertFails(setDoc(doc(como('admin'), 'lc_usuarios', 'Mayus@cesantoni.com.mx'), { area: 'ventas', activo: true }));
+  await assertFails(setDoc(doc(como('admin'), 'lc_usuarios', 'x@cesantoni.com.mx'), { area: 'jefe', activo: true }));
+  // Dado de baja o sin alta: sin acceso aunque tenga sesión
+  await assertFails(getDocs(collection(como('baja@cesantoni.com.mx'), 'lc_folios')));
+  await assertFails(getDocs(collection(como('desconocido@gmail.com'), 'lc_folios')));
+  // Correo sin verificar: sin acceso
+  await assertFails(getDocs(collection(como('ventas', 0, { email_verified: false }), 'lc_folios')));
+  // El administrador principal entra aunque no tenga documento, sin importar mayúsculas
+  await assertSucceeds(getDoc(doc(como('admin', 0, { email: 'JRoman@cesantoni.com.mx' }), 'lc_despachos', 'F1')));
 });
 test('Alertas e historial: con el área de quien escribe', async () => {
-  await assertSucceeds(setDoc(doc(como('operacion'), 'lc_alertas', 'A1'), { tipo: 'parado', texto: 't', area: 'operacion', leida: false, fecha: 'x' }));
-  await assertFails(setDoc(doc(como('operacion'), 'lc_alertas', 'A2'), { tipo: 'parado', texto: 't', area: 'admin', leida: false, fecha: 'x' }));
+  await assertSucceeds(setDoc(doc(como('operacion'), 'lc_alertas', 'A1'), { tipo: 'parado', texto: 't', area: 'operacion', por: CORREO.operacion, leida: false, fecha: 'x' }));
+  await assertFails(setDoc(doc(como('operacion'), 'lc_alertas', 'A2'), { tipo: 'parado', texto: 't', area: 'admin', por: CORREO.operacion, leida: false, fecha: 'x' }));
+  await assertFails(setDoc(doc(como('operacion'), 'lc_alertas', 'A3'), { tipo: 'parado', texto: 't', area: 'operacion', por: CORREO.ventas, leida: false, fecha: 'x' }));
   await assertSucceeds(getDocs(collection(como('ventas'), 'lc_alertas')));
   await assertFails(getDocs(collection(env.unauthenticatedContext().firestore(), 'lc_alertas')));
   await assertSucceeds(updateDoc(doc(como('ventas'), 'lc_alertas', 'A1'), { leida: true }));
   await assertFails(updateDoc(doc(como('ventas'), 'lc_alertas', 'A1'), { texto: 'cambiado' }));
-  await assertSucceeds(setDoc(doc(como('ventas'), 'lc_folios', 'F2', 'historial', 'h1'), { area: 'ventas', texto: 'x', fecha: 'x' }));
+  await assertSucceeds(setDoc(doc(como('ventas'), 'lc_folios', 'F2', 'historial', 'h1'), { area: 'ventas', por: CORREO.ventas, texto: 'x', fecha: 'x' }));
 });
 test('La sesión vence a las 12 horas', async () => {
   await assertSucceeds(getDoc(doc(como('transporte', 11.9), 'lc_despachos', 'F1')));
   await assertFails(getDoc(doc(como('transporte', 12.1), 'lc_despachos', 'F1')));
   await assertFails(updateDoc(doc(como('operacion', 13), 'lc_folios', 'F2'), { estatus: 'ARMADO', motivo: '' }));
-});
-test('Configuración inicial: una sola vez', async () => {
-  // Ya existe lc_config/inicio: un recién llegado no puede darse de alta como administrador.
-  const db = env.authenticatedContext('nuevo', { auth_time: ahora }).firestore();
-  const b = writeBatch(db);
-  b.set(doc(db, 'lc_areas', 'nuevo'), { area: 'admin' });
-  await assertFails(b.commit());
 });

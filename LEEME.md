@@ -9,30 +9,31 @@ Controla el embarque desde que Ventas sube el pedido hasta que Transporte lo ent
 frameworks) publicado en GitHub Pages. Usa el proyecto de Firebase `proveedores-cesantoni` con **colecciones propias (`lc_`)**, separadas
 de Proveedores (`pv_`) y de Movimientos (`sm_`). Nada se mezcla con esos sistemas.
 
-## Puesta en marcha (una sola vez)
+## Puesta en marcha
 
 1. **Reglas:** Firebase › Firestore Database › Reglas › pega **todo** `firestore.rules` del repositorio `proveedores-cesantoni.github.io`
-   (ya incluye el bloque «Logística CESANTONI», colecciones `lc_`) › Publicar.
-2. **Dominio:** Firebase › Authentication › Settings › Authorized domains › agrega `logistica-cesantoni.github.io`.
-3. Abre https://logistica-cesantoni.github.io/ en cuanto se publique. Como es la primera vez, sale **Configuración inicial**: escribe las
-   cuatro contraseñas (Administrador, Ventas, Operación y Transporte). Hazlo tú mismo enseguida: la configuración inicial solo se puede
-   hacer una vez, y quien la haga primero define las contraseñas.
-4. En **Configuración** ajusta el origen (CEDIS) con sus coordenadas, y en **Catálogos** da de alta las unidades de cada transportista.
+   (rama `claude/anden-mini-erp-transport-p2601k`, bloque «Logística CESANTONI», colecciones `lc_`) › Publicar.
+2. **Acceso por correo:** Firebase › Authentication › Sign-in method › Correo electrónico/contraseña › activa
+   **Vínculo de correo electrónico (acceso sin contraseña)**.
+3. **Dominio:** Authentication › Settings › Authorized domains › `logistica-cesantoni.github.io`.
+4. Entra con `jroman@cesantoni.com.mx` (siempre es Administrador) y en **Configuración › Usuarios** da de alta a cada persona
+   con su correo y su área.
 
-## Accesos por área
+## Accesos
+
+Cada persona escribe su correo, le llega una liga (remitente `noreply@proveedores-cesantoni.firebaseapp.com`) y con un clic entra.
+No hay contraseñas. Su área está en `lc_usuarios/{correo}`:
 
 | Área | Ve |
 |---|---|
 | Ventas | Ventas + Alertas |
 | Operación | Operación + Alertas |
-| Transporte | Todo, igual que Administrador (salvo cambiar contraseñas) |
-| Administrador | Todo, incluidas las contraseñas de las áreas |
+| Transporte | Todo, igual que Administrador (salvo Usuarios) |
+| Administrador | Todo, incluidos los Usuarios |
 
-Cada área es una cuenta de Firebase (`ventas@logistica-cesantoni.local`, etc.; nadie escribe el correo, solo elige el área). El área de cada
-cuenta vive en `lc_areas/{uid}`. **Las reglas de Firestore revisan el área en cada lectura y escritura**: ocultar botones no es lo que
-protege. La tarifa negociada, el operador, las placas y el checklist están en `lc_despachos`, que solo leen Transporte y Administrador; la
-Pantalla solo lee `lc_folios`, donde no hay nada de eso. La sesión vence a las 12 horas de escribir la contraseña (lo revisan las reglas,
-no solo la página).
+Las reglas de Firestore revisan en cada lectura y escritura que el correo esté verificado, dado de alta y activo, y su área. Dar de
+baja a alguien le quita el acceso al momento. El historial y las alertas guardan el correo de quien hizo cada cambio. La sesión vence
+a las 12 horas de abrir la liga.
 
 ## Nacional y Última Milla
 
@@ -76,18 +77,18 @@ Mientras tanto, todo el Monitoreo funciona con datos simulados.
 
 ## Colecciones
 
-`lc_folios` (+ `historial`), `lc_pantalla`, `lc_despachos`, `lc_unidades`, `lc_destinos`, `lc_rutas`, `lc_alertas`, `lc_areas`, `lc_config`
-(`inicio`, `general` = origen, `gps` = puente).
+`lc_folios` (+ `historial`), `lc_pantalla`, `lc_despachos`, `lc_unidades`, `lc_destinos`, `lc_rutas`, `lc_alertas`, `lc_usuarios` (correo → área),
+`lc_config` (`general` = origen, `gps` = puente).
 
 ## Pruebas
 
 - `node --test tests/reglas.test.mjs`: reglas de negocio, lectura del Formato de Acopio (`python3 tests/acopio_ejemplo.py tests/acopio.xlsx`),
   ruta y GPS simulado.
-- `tests/reglas-firestore.test.mjs`: reglas de Firestore en el emulador (permisos por área, tarifa, documentos, 12 horas).
-- `tests/e2e.mjs`: recorrido completo en navegador (Playwright) contra el emulador.
+- `tests/reglas-firestore.test.mjs`: reglas de Firestore en el emulador (usuarios por correo, permisos por área, tarifa, documentos, 12 horas).
+- `tests/e2e.mjs`: recorrido completo en navegador (Playwright) contra el emulador, entrando con la liga al correo que guarda el emulador.
 
 ## Pendiente
 
 - Envío real de correos de alertas (hoy simulado).
 - Puente de Samsara publicado (hoy el Monitoreo es simulado).
-- Usuarios individuales, si algún día hace falta saber quién hizo qué dentro de un área (hoy el historial registra el área).
+- Registro automático de folios desde el correo de Outlook (por definir: qué correos, modificaciones y desde qué fecha).

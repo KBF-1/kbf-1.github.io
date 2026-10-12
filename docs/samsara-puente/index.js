@@ -22,7 +22,9 @@ exports.samsara = onRequest({ secrets: [SAMSARA_TOKEN], cors: [ORIGEN], region: 
     if (!idToken) return res.status(401).json({ error: 'Sin sesión' });
     const yo = await admin.auth().verifyIdToken(idToken);
     if (Date.now() / 1000 - yo.auth_time > 12 * 3600) return res.status(401).json({ error: 'Sesión vencida' });
-    const area = (await admin.firestore().doc('lc_areas/' + yo.uid).get()).get('area');
+    const correo = String(yo.email || '').toLowerCase();
+    const u = correo && yo.email_verified ? await admin.firestore().doc('lc_usuarios/' + correo).get() : null;
+    const area = correo === 'jroman@cesantoni.com.mx' ? 'admin' : u && u.exists && u.get('activo') !== false ? u.get('area') : '';
     if (!['transporte', 'admin'].includes(area)) return res.status(403).json({ error: 'Sin permiso' });
 
     const vehiculo = String(req.query.vehiculo || '');
