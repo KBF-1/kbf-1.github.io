@@ -1,7 +1,7 @@
 /* Formato de Acopio (.xlsx / .xlsm): lee las hojas Base, CB360 y Exhibición sin librerías, separa por cliente y destino,
    y calcula tarimas, resto de tarima y peso. Los títulos de columna se buscan por nombre (no por posición), así que el
    formato puede mover columnas. Todo lo calculado se muestra antes de crear los folios para corregirlo a mano. */
-import { combinarFolios, tarimas, tipoUnidad, redondeo, norm, coordenadasDeLiga } from './reglas.js?v=10';
+import { combinarFolios, tarimas, tipoUnidad, redondeo, norm, coordenadasDeLiga } from './reglas.js?v=12';
 
 export const HOJAS = [['BASE', 'Base'], ['CB360', 'CB360'], ['EXHIBICION', 'Exhibición']];
 
@@ -187,7 +187,7 @@ function interpretarCesantoni(hojas) {
     if (cliente) clientes.add(cliente);
     if (texto(g(f, 'NUMERO ORDEN'))) pedidos.add(texto(g(f, 'NUMERO ORDEN')));
     if (!paradas.has(codigo)) {
-      paradas.set(codigo, { codigo, sucursal: texto(g(f, 'NOM SUCURSAL')) || cliente, ciudad: texto(g(f, 'DESTINO')) || texto(g(f, 'CD SUCURSAL')),
+      paradas.set(codigo, { codigo, venta: texto(g(f, 'VENTA')) || texto(g(f, 'NUMERO PRINCIPAL')), sucursal: texto(g(f, 'NOM SUCURSAL')) || cliente, ciudad: texto(g(f, 'DESTINO')) || texto(g(f, 'CD SUCURSAL')),
         tarimas: 0, restos_liso: 0, restos_deco: 0, peso_kg: 0, m2: 0, partidas: 0 });
     }
     const p = paradas.get(codigo);

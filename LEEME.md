@@ -55,6 +55,19 @@ Para una revisión nueva del documento se reemplazan las listas de ese archivo.
 La Pantalla lee `lc_pantalla`, una copia pública de cada folio sin material, direcciones, teléfonos, tarifas ni nombres de clientes
 de Última Milla. `lc_folios` ya solo lo leen las áreas con sesión.
 
+## Catálogos de Nacional (importados)
+
+En **Catálogos › Importar catálogos de Nacional** se suben los Excel de Logística:
+
+- **Seguimiento Integral Logística** (hoja *Catalogos*): transportistas (razón social, teléfono, correos), clientes (customer service,
+  cita, zona, gerentes, tipo de flete, días de crédito) y destinos (días de tránsito y tarifa por tonelada).
+- **Fletes** (hoja *CATALOGOS*): tarifa y tarifa LP por destino, clasificación del cliente (Nacional, Exportación, Sin flete) y plazo
+  de pago, correo e IVA del transportista.
+
+Se guardan en Firebase (`lc_config/transportistas`, `tarifas`, `clientes`), no en este repositorio público. Las cuentas espejo
+capturadas a mano se conservan al volver a importar. En el despacho Nacional se sugiere la tarifa: **tarifa por tonelada del destino ×
+toneladas del folio** (con varias paradas, la del destino más caro) y se muestran los datos del cliente (aviso si pide cita o es Sin flete).
+
 ## Flujo de un folio
 
 1. **Ventas** sube uno o varios Formatos de Acopio (macro de CESANTONI). Cada archivo es un folio (celda «Folio:» de Base) con su clasificación y sus destinos de envío (sucursal, ciudad, tarimas, restos en cajas, kilos); CB360 y Exhibición suman su peso. Folios que van en la misma unidad se juntan con «Juntar marcados». Otros formatos: las columnas se reconocen por su

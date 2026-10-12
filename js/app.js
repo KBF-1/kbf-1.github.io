@@ -1,12 +1,13 @@
 /* Control de Embarques · Somos Logística CESANTONI.
    Ventas da de alta el pedido → Operación lo arma y documenta → Transporte lo despacha y lo monitorea. */
-import * as API from './datos.js?v=10';
-import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=10';
-import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=10';
-import { leerLibro, interpretar, combinar } from './acopio.js?v=10';
-import { planear } from './ruta.js?v=10';
-import { ubicacion } from './gps.js?v=10';
-import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=10';
+import * as API from './datos.js?v=12';
+import { ESTATUS, ESTATUS_OPERACION, DOCUMENTOS, CHECKLIST, docsCompletos, docsAvance, tipoUnidad, excedeCapacidad, revisarChecklist, norm, combinarFolios, esLigaCorta } from './reglas.js?v=12';
+import { revisarPartida, EMBALAJES, ADHESIVOS, REVISION } from './embalajes.js?v=12';
+import { leerLibro, interpretar, combinar } from './acopio.js?v=12';
+import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara } from './catalogos.js?v=12';
+import { planear } from './ruta.js?v=12';
+import { ubicacion } from './gps.js?v=12';
+import { h, mount, toast, ocupado, fecha, kg, toneladas, pesos, modal, campo, entrada, selector, logos, cargarMapa, mapaEn, leerCoordenadas } from './ui.js?v=12';
 
 const CFG = window.LC_CONFIG;
 const main = document.getElementById('main'), nav = document.getElementById('nav'), cuenta = document.getElementById('cuenta');
@@ -400,8 +401,9 @@ function estatusOperacion(f) {
 /* Nacional y Última Milla se despachan distinto: Nacional (transportistas externos) lleva tarifa y no lleva checklist;
    Última Milla (unidades propias) lleva checklist pre-salida y la tarifa es opcional. */
 async function transporte() {
-  const [todos, unidades, desp, cfgT] = await Promise.all([API.folios(), API.catalogo('unidades'), API.despachos(), API.config('transportistas')]);
+  const [todos, unidades, desp, cfgT, cfgTar, cfgCli] = await Promise.all([API.folios(), API.catalogo('unidades'), API.despachos(), API.config('transportistas'), API.config('tarifas'), API.config('clientes')]);
   const transportistas = cfgT.lista || [];
+  const cat = { tarifas: cfgTar.lista || [], clientes: cfgCli.lista || [] };
   const leer = (k, d) => { try { return sessionStorage.getItem(k) || d; } catch (e) { return d; } };
   const fijar = (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) { /* sin almacenamiento */ } };
   let envio = leer('lc-envio-tr', 'NACIONAL'), filtro = leer('lc-filtro-tr', 'listos');
@@ -434,20 +436,21 @@ async function transporte() {
           t + ' (' + todos.filter((f) => (f.tipo_envio || 'NACIONAL') === k && f.estatus !== 'ENTREGADO').length + ')'))),
       h('p', { class: 'gris chico' }, um ? 'Última Milla: unidades de reparto con Samsara y checklist pre-salida; tarifa solo en la unidad contratada.' : 'Nacional: transportista externo con tarifa negociada; se monitorea en su cuenta espejo; sin checklist pre-salida.'),
       h('div', { class: 'pestanas', role: 'tablist' }, Object.entries(grupos).map(([k, [t, fn]]) => h('button', { role: 'tab', 'aria-selected': String(k === filtro), class: k === filtro ? 'activa' : '', onclick: () => { filtro = k; pintar(); } }, t + ' (' + delTipo.filter(fn).length + ')'))),
-      h('section', { class: 'tarjeta' }, tabla(lista, columnas, (f) => panelDespacho(f, unidades, desp[f.id] || {}, transportistas), 'No hay folios en esta vista.', true)));
+      h('section', { class: 'tarjeta' }, tabla(lista, columnas, (f) => panelDespacho(f, unidades, desp[f.id] || {}, transportistas, cat), 'No hay folios en esta vista.', true)));
   };
   mount(main, encabezado('Transporte', 'Asigna transportista y unidad, captura la cita y manda a ruta.',
     h('a', { class: 'btn', href: '#catalogos' }, 'Catálogo de unidades')), zona);
   pintar();
 }
 
-function panelDespacho(f, unidades, d, transportistas) {
+function panelDespacho(f, unidades, d, transportistas, cat) {
+  cat = cat || { tarifas: [], clientes: [] };
   const um = esUM(f);
   // Cada tipo de envío usa su flota: Nacional, unidades de transportistas externos; Última Milla, las de reparto.
   const flota = unidades.filter((u) => (um ? esDeUM(u) : !esDeUM(u)) || u.id === d.unidad_id);
   const uSel = selector([['', 'Elige una unidad…']].concat(flota.sort((a, b) => (a.transportista + a.nombre).localeCompare(b.transportista + b.nombre))
     .map((u) => [u.id, u.transportista + ' · ' + u.nombre + ' · ' + u.tipo + ' · ' + toneladas(u.capacidad_kg)])), d.unidad_id || '');
-  const transportista = entrada({ value: f.transportista || '' }), operador = entrada({ value: d.operador || '' }), placas = entrada({ value: d.placas || '' });
+  const transportista = entrada({ value: f.transportista || '', list: 'dl-transportistas' }), operador = entrada({ value: d.operador || '' }), placas = entrada({ value: d.placas || '' });
   const cita = entrada({ type: 'datetime-local', value: f.cita || '' }), anden = entrada({ value: f.anden || '', maxlength: 10 });
   const tarifa = entrada({ type: 'number', min: 0, step: '0.01', value: d.tarifa || '', disabled: !!d.sin_tarifa });
   // Última Milla: la tarifa es opcional (unidad propia, sin costo de flete).
@@ -515,7 +518,9 @@ function panelDespacho(f, unidades, d, transportistas) {
   const dlg = modal('Despacho ' + (um ? 'Última Milla' : 'Nacional') + ' · ' + f.folio,
     h('div', { class: 'ficha' }, dato('Cliente', f.cliente), dato('Destino', f.destino || '—'), dato('Peso', kg(f.peso_kg) + ' · ' + f.tipo_unidad), dato('Tarimas', String(f.tarimas)), dato('Documentos', docsAvance(f.docs) + '/3'), dato('Estatus', pill(f.estatus))),
     f.entrega ? [h('h3', null, 'Entrega (Última Milla)'), bloqueEntrega(f)] : null,
+    !um ? bloqueCliente(clientePara(cat.clientes, f)) : null,
     h('h3', null, 'Asignación'),
+    h('datalist', { id: 'dl-transportistas' }, (transportistas || []).map((t) => h('option', { value: t.nombre }))),
     !flota.length ? h('p', { class: 'aviso' }, 'Aún no hay unidades de ' + (um ? 'Última Milla' : 'transportistas externos') + ' en el catálogo. ', h('a', { href: '#catalogos', onclick: () => dlg.cerrar() }, 'Agregar unidades')) : null,
     h('div', { class: 'rejilla' },
       h('div', { class: 'todo' }, campo('Unidad', uSel)), h('div', { class: 'todo' }, avisoPeso),
@@ -523,7 +528,7 @@ function panelDespacho(f, unidades, d, transportistas) {
       campo('Fecha y hora de cita', cita), campo('Andén', anden),
       h('div', null, campo(um ? 'Tarifa (MXN, opcional)' : 'Tarifa negociada (MXN)', tarifa, 'Solo la ven Transporte y Administrador.'),
         um ? h('label', { class: 'casilla' }, sinTarifa, ' No aplica tarifa') : null)),
-    !um ? [h('div', { class: 'rejilla' }, h('div', { class: 'todo' }, campo('Liga de rastreo del viaje (opcional)', ligaViaje))), h('h3', null, 'Cuenta espejo del transportista'), espejo] : null,
+    !um ? [sugerenciaTarifa(f, cat, tarifa), h('div', { class: 'rejilla' }, h('div', { class: 'todo' }, campo('Liga de rastreo del viaje (opcional)', ligaViaje))), h('h3', null, 'Cuenta espejo del transportista'), espejo] : null,
     h('div', { class: 'acciones' }, guardar),
     um ? [h('h3', null, 'Checklist pre-salida'),
       d.checklist_fecha ? h('p', { class: 'gris chico' }, 'Última revisión: ' + fecha(d.checklist_fecha)) : null,
@@ -707,9 +712,65 @@ async function catalogos() {
     h('section', { class: 'tarjeta' }, h('div', { class: 'cabecera' }, h('h2', null, 'Unidades'), h('button', { class: 'btn primario', onclick: () => editarUnidad() }, '+ Nueva unidad')),
       tablaU('Última Milla · reparto (Samsara)', unidades.filter(esDeUM), 'GPS'),
       tablaU('Nacional · transportistas externos', unidades.filter((u) => !esDeUM(u)), 'GPS')),
+    seccionImportar(),
     seccionTransportistas(transportistas),
+    await seccionConsulta(),
     seccionDestinos(destinos, folios),
     seccionEmbalajes());
+}
+/* Importar catálogos de Nacional desde los Excel de Logística. */
+function seccionImportar() {
+  const seg = entrada({ type: 'file', accept: '.xlsm,.xlsx', id: 'imp-seguimiento' }), fle = entrada({ type: 'file', accept: '.xlsx,.xlsm', id: 'imp-fletes' });
+  const zona = h('div');
+  const btn = h('button', { class: 'btn primario', type: 'button' }, 'Leer archivos');
+  btn.addEventListener('click', async () => {
+    if (!seg.files[0] && !fle.files[0]) { toast('Elige al menos un archivo.', true); return; }
+    try {
+      await ocupado(btn, async () => {
+        const leer = async (inp) => (inp.files[0] ? leerLibro(new Uint8Array(await inp.files[0].arrayBuffer())) : null);
+        const [hs, hf] = await Promise.all([leer(seg), leer(fle)]);
+        const datos = { seguimiento: hs ? desdeSeguimiento(hs) : null, fletes: hf ? desdeFletes(hf) : null };
+        const [t, ta, cl] = await Promise.all([API.config('transportistas'), API.config('tarifas'), API.config('clientes')]);
+        const r = combinarCatalogos(Object.assign(datos, { actuales: { transportistas: t.lista || [], tarifas: ta.lista || [], clientes: cl.lista || [] } }));
+        const guardar = h('button', { class: 'btn primario', type: 'button' }, 'Guardar catálogos');
+        guardar.addEventListener('click', async () => {
+          try {
+            await ocupado(guardar, () => Promise.all([API.guardarConfig('transportistas', { lista: r.transportistas }), API.guardarConfig('tarifas', { lista: r.tarifas }), API.guardarConfig('clientes', { lista: r.clientes })]));
+            toast('Catálogos guardados.'); catalogos().catch(fallo);
+          } catch (x) { err(x); }
+        });
+        mount(zona, h('div', { class: 'aviso ok-bg' },
+          h('b', null, 'Listo para guardar: '), r.transportistas.length + ' transportistas, ' + r.clientes.length + ' clientes y ' + r.tarifas.length + ' destinos con tarifa. ',
+          'Las cuentas espejo que ya capturaste se conservan.'), h('div', { class: 'acciones' }, guardar));
+      }, 'Leyendo…');
+    } catch (x) { mount(zona, h('p', { class: 'aviso mal' }, x.message)); }
+  });
+  return h('section', { class: 'tarjeta' }, h('h2', null, 'Importar catálogos de Nacional'),
+    h('p', { class: 'gris chico' }, 'Transportistas, clientes y tarifas por destino desde tus Excel. Se puede repetir cada vez que los actualices; solo lo ven Transporte y Administrador.'),
+    h('div', { class: 'rejilla' }, campo('Seguimiento Integral Logística (hoja Catalogos)', seg), campo('Fletes (hoja CATALOGOS)', fle)),
+    h('div', { class: 'acciones' }, btn), zona);
+}
+/* Clientes y tarifas importados (consulta). */
+async function seccionConsulta() {
+  const [ta, cl] = await Promise.all([API.config('tarifas'), API.config('clientes')]);
+  const tarifas = ta.lista || [], clientes = cl.lista || [];
+  if (!tarifas.length && !clientes.length) return null;
+  const buscar = entrada({ type: 'search', placeholder: 'Buscar destino o cliente…', 'aria-label': 'Buscar en tarifas y clientes' });
+  const tT = h('tbody'), tC = h('tbody');
+  const pintar = () => {
+    const q = norm(buscar.value);
+    mount(tT, tarifas.filter((t) => !q || norm(t.destino + ' ' + (t.estado || '')).includes(q)).slice(0, 300).map((t) => h('tr', null, h('td', null, h('b', null, t.destino)), h('td', null, t.estado || '—'),
+      h('td', { class: 'num' }, t.tarifa !== null && t.tarifa !== undefined ? pesos(t.tarifa) : '—'), h('td', { class: 'num' }, t.tarifa_fletes ? pesos(t.tarifa_fletes) : '—'), h('td', { class: 'num' }, t.dias ? String(t.dias) : '—'))));
+    mount(tC, clientes.filter((c) => !q || norm(c.nombre + ' ' + c.num + ' ' + (c.corporativo || '')).includes(q)).slice(0, 300).map((c) => h('tr', null, h('td', null, c.num || '—'), h('td', null, h('b', null, c.nombre)),
+      h('td', null, c.customer || '—'), h('td', null, c.zona || '—'), h('td', null, c.clasificacion || '—'), h('td', null, /^S/i.test(c.cita || '') ? 'Sí' : '—'))));
+  };
+  buscar.addEventListener('input', pintar);
+  pintar();
+  return h('section', { class: 'tarjeta' }, h('h2', null, 'Tarifas y clientes de Nacional'), h('div', { class: 'filtros' }, buscar),
+    h('details', { class: 'desglose', open: true }, h('summary', null, 'Tarifas por destino (' + tarifas.length + ') · pesos por tonelada'),
+      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Destino', 'Estado', 'Tarifa/t', 'Tarifa en Fletes/t', 'Días'].map((x) => h('th', null, x)))), tT))),
+    h('details', { class: 'desglose' }, h('summary', null, 'Clientes (' + clientes.length + ')'),
+      h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Núm.', 'Cliente', 'Customer Service', 'Zona', 'Clasificación', 'Cita'].map((x) => h('th', null, x)))), tC))));
 }
 /* Transportistas externos (Nacional) y su cuenta espejo: la plataforma GPS que comparten para ver sus unidades.
    Se guarda en lc_config/transportistas (solo Transporte y Administrador la leen). */
@@ -723,7 +784,8 @@ function seccionTransportistas(lista) {
     const btn = h('button', { class: 'btn primario', type: 'submit' }, 'Guardar');
     const dlg = modal(t.nombre ? 'Transportista · ' + t.nombre : 'Nuevo transportista', h('form', { onsubmit: async (e) => {
       e.preventDefault();
-      const nuevo = { nombre: c.nombre.value.trim(), plataforma: c.plataforma.value.trim(), url: c.url.value.trim(), usuario: c.usuario.value.trim(), clave: c.clave.value, contacto: c.contacto.value.trim() };
+      // Conserva lo importado (razón social, teléfono, correos, plazo de pago) y cambia solo lo capturado aquí.
+      const nuevo = Object.assign({}, t, { nombre: c.nombre.value.trim(), plataforma: c.plataforma.value.trim(), url: c.url.value.trim(), usuario: c.usuario.value.trim(), clave: c.clave.value, contacto: c.contacto.value.trim() });
       if (!nuevo.nombre) return;
       const otra = lista.filter((x) => x !== t && norm(x.nombre) !== norm(nuevo.nombre));
       try { await ocupado(btn, () => guardarLista(otra.concat([nuevo]))); dlg.cerrar(); toast('Transportista guardado.'); } catch (x) { err(x); }
@@ -733,12 +795,40 @@ function seccionTransportistas(lista) {
   };
   return h('section', { class: 'tarjeta' }, h('div', { class: 'cabecera' }, h('h2', null, 'Transportistas externos · cuentas espejo'), h('button', { class: 'btn primario', onclick: () => editar() }, '+ Transportista')),
     h('p', { class: 'gris chico' }, 'Para Nacional: la cuenta espejo es el acceso a la plataforma GPS del transportista. En Monitoreo y en el despacho aparece el botón para abrirla.'),
-    h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Transportista', 'Plataforma', 'Cuenta espejo', 'Usuario', 'Contacto', ''].map((x) => h('th', null, x)))),
-      h('tbody', null, lista.length ? lista.map((t) => h('tr', null, h('td', null, h('b', null, t.nombre)), h('td', null, t.plataforma || '—'),
+    h('div', { class: 'tabla-scroll' }, h('table', { class: 'tabla compacta' }, h('thead', null, h('tr', null, ['Transportista', 'Teléfono · correo', 'Pago', 'Plataforma', 'Cuenta espejo', 'Usuario', 'Contacto', ''].map((x) => h('th', null, x)))),
+      h('tbody', null, lista.length ? lista.map((t) => h('tr', null, h('td', null, h('b', null, t.nombre), t.razon_social && t.razon_social !== t.nombre ? [h('br'), h('small', { class: 'gris' }, t.razon_social)] : null),
+        h('td', { class: 'chico' }, [t.telefono, t.correo].filter(Boolean).join(' · ') || '—'),
+        h('td', { class: 'chico' }, t.plazo_pago ? t.plazo_pago + ' días' + (t.iva ? ' · IVA ' + t.iva : '') : '—'), h('td', null, t.plataforma || '—'),
         h('td', null, t.url ? h('a', { href: t.url, target: '_blank', rel: 'noopener' }, 'Abrir ↗') : h('span', { class: 'gris' }, 'Sin liga')), h('td', null, t.usuario || '—'), h('td', null, t.contacto || '—'),
         h('td', null, h('button', { class: 'btn chico', onclick: () => editar(t) }, 'Editar'), ' ',
           h('button', { class: 'btn chico', onclick: async () => { if (confirm('¿Borrar a ' + t.nombre + '?')) { try { await guardarLista(lista.filter((x) => x !== t)); } catch (x) { err(x); } } } }, 'Borrar'))))
-        : h('tr', null, h('td', { colspan: 6, class: 'gris centro' }, 'Sin transportistas.'))))));
+        : h('tr', null, h('td', { colspan: 8, class: 'gris centro' }, 'Sin transportistas.'))))));
+}
+/* Tarifa por tonelada del destino (catálogo importado) × toneladas del folio. */
+function sugerenciaTarifa(f, cat, campoTarifa) {
+  const t = tarifaPara(cat.tarifas, lugaresDe(f).map((l) => l.split(' · ').pop()).concat(String(f.destino || '').split(' / ')));
+  if (!t) return h('p', { class: 'gris chico' }, cat.tarifas.length ? 'Sin tarifa en el catálogo para ' + (f.destino || 'este destino') + '.' : 'Importa los catálogos de Nacional (Catálogos) para sugerir la tarifa.');
+  const ton = (Number(f.peso_kg) || 0) / 1000, total = Math.round((Number(t.tarifa) || 0) * ton * 100) / 100;
+  return h('div', { class: 'sugerencia' },
+    h('div', null, h('b', null, 'Tarifa ' + t.destino + ': ' + pesos(t.tarifa) + ' por tonelada'), t.dias ? ' · ' + t.dias + (t.dias === 1 ? ' día' : ' días') + ' de tránsito' : '',
+      f.paradas && f.paradas.length > 1 ? h('span', { class: 'gris chico' }, ' (varias paradas: se toma el destino más caro)') : null,
+      h('br'), h('span', { class: 'gris chico' }, ton.toFixed(2) + ' t × ' + pesos(t.tarifa) + ' = ', h('b', null, pesos(total)),
+        t.tarifa_fletes && t.tarifa_fletes !== t.tarifa ? ' · en Fletes: ' + pesos(t.tarifa_fletes) + '/t' : '')),
+    campoTarifa && total ? h('button', { type: 'button', class: 'btn chico', onclick: () => { campoTarifa.disabled = false; campoTarifa.value = total; } }, 'Usar ' + pesos(total)) : null);
+}
+/* Datos del cliente (catálogo importado): customer service, cita, zona, clasificación. */
+function bloqueCliente(c) {
+  if (!c) return null;
+  const sinFlete = /SIN FLETE/i.test(c.clasificacion || '');
+  return h('div', { class: 'cliente-cat' },
+    h('div', { class: 'ficha' },
+      dato('Cliente ' + (c.num || ''), c.nombre + (c.corporativo && c.corporativo !== c.nombre ? ' · ' + c.corporativo : '')),
+      dato('Customer Service', c.customer || '—'), dato('Zona', [c.zona, c.no_zona].filter(Boolean).join(' · ') || '—'),
+      dato('Clasificación', c.clasificacion || '—'), c.tipo_flete ? dato('Tipo de flete', c.tipo_flete) : null,
+      c.gerente_regional ? dato('Gerente regional', c.gerente_regional) : null),
+    /^S/i.test(c.cita || '') ? h('p', { class: 'aviso' }, 'Este cliente pide CITA para recibir.') : null,
+    sinFlete ? h('p', { class: 'aviso' }, 'Cliente SIN FLETE: no se cobra flete.') : null,
+    c.observaciones ? h('p', { class: 'gris chico' }, c.observaciones) : null);
 }
 /* Botón y datos de la cuenta espejo de un transportista (Nacional). */
 function cuentaEspejo(t, ligaViaje) {

@@ -9,6 +9,8 @@ const ACOPIO_CES = process.env.ACOPIO_CES || fileURLToPath(new URL('./acopio-ces
 const ACOPIO_CES2 = process.env.ACOPIO_CES2 || fileURLToPath(new URL('./acopio-cesantoni-2.xlsm', import.meta.url));
 const CUADRO = process.env.CUADRO || fileURLToPath(new URL('./cuadro-envio.xlsm', import.meta.url));
 const CUADRO2 = process.env.CUADRO2 || fileURLToPath(new URL('./cuadro-envio-2.xlsm', import.meta.url));
+const SEGUIMIENTO = process.env.SEGUIMIENTO || fileURLToPath(new URL('./seguimiento-ejemplo.xlsx', import.meta.url));
+const FLETES = process.env.FLETES || fileURLToPath(new URL('./fletes-ejemplo.xlsx', import.meta.url));
 const SALIDA = process.env.CAPTURAS || '';
 let ok = 0, mal = 0;
 const check = (cond, nombre) => { if (cond) { ok++; console.log('  ✓ ' + nombre); } else { mal++; console.log('  ✗ ' + nombre); } };
@@ -80,9 +82,17 @@ await entrar('jroman@cesantoni.com.mx');
 
 console.log('Transporte: catálogo de unidades');
 await ir('catalogos', 'Catálogos');
+// Catálogos de Nacional desde Excel (Seguimiento + Fletes, datos inventados)
+await page.locator('#imp-seguimiento').setInputFiles(SEGUIMIENTO);
+await page.locator('#imp-fletes').setInputFiles(FLETES);
+await page.getByRole('button', { name: 'Leer archivos' }).click();
+await page.getByText('Listo para guardar').waitFor();
+await page.getByRole('button', { name: 'Guardar catálogos' }).click();
+await esperarToast('Catálogos guardados');
+await page.locator('summary', { hasText: 'Tarifas por destino (4)' }).waitFor();
+check(true, 'importa transportistas, clientes y tarifas desde los Excel');
 // Transportista externo con su cuenta espejo
-await page.getByRole('button', { name: '+ Transportista' }).click();
-await page.locator('.modal').getByLabel('Transportista').fill('Fletes del Bajío');
+await page.locator('tr', { hasText: 'FLETES DEL BAJIO S.A. DE C.V.' }).getByRole('button', { name: 'Editar' }).click();
 await page.getByLabel('Plataforma GPS').fill('Wialon');
 await page.getByLabel('Liga de la cuenta espejo').fill('https://espejo.ejemplo.com/fletes');
 await page.getByLabel('Usuario').fill('cesantoni'); await page.getByLabel('Contraseña').fill('espejo-123');
@@ -208,6 +218,11 @@ await page.getByLabel('Fecha y hora de cita').fill('2026-10-13T09:30');
 await page.getByLabel('Andén').fill('4');
 await page.getByLabel('Tarifa negociada (MXN)').fill('18500');
 check(await page.locator('.modal h3', { hasText: 'Checklist pre-salida' }).count() === 0, 'Nacional: el despacho no lleva checklist');
+check(await page.locator('.modal .sugerencia', { hasText: 'Tarifa SALTILLO: $530.00 por tonelada' }).count() === 1, 'sugiere la tarifa por tonelada del destino');
+await page.getByRole('button', { name: 'Usar $23,055.00' }).click();
+check((await page.getByLabel('Tarifa negociada (MXN)').inputValue()) === '23055', 'tarifa = 43.5 t × $530');
+check(await page.locator('.modal .cliente-cat', { hasText: 'ANA PRUEBA' }).count() === 1 && await page.locator('.modal .cliente-cat', { hasText: 'pide CITA' }).count() === 1, 'muestra customer service y aviso de cita del cliente');
+await page.getByLabel('Tarifa negociada (MXN)').fill('18500'); // tarifa negociada distinta a la de catálogo
 check(await page.locator('.modal .espejo a', { hasText: 'Cuenta espejo · Wialon' }).count() === 1, 'Nacional: el despacho muestra la cuenta espejo del transportista');
 check(await page.locator('.modal select option', { hasText: 'REPARTO-01' }).count() === 0, 'Nacional: solo lista unidades de transportistas externos');
 await foto('03-despacho');

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { combinarFolios, tipoUnidad, tarimas, idFolio, docsCompletos, revisarChecklist, excedeCapacidad, coordenadasDeLiga, esLigaCorta } from '../js/reglas.js';
 import { revisarPartida, EMBALAJES } from '../js/embalajes.js';
+import { desdeSeguimiento, desdeFletes, combinarCatalogos, tarifaPara, clientePara } from '../js/catalogos.js';
 import { leerLibro, interpretar, combinar } from '../js/acopio.js';
 import { planear, km } from '../js/ruta.js';
 import { simulada } from '../js/gps.js';
@@ -148,4 +149,23 @@ test('Pesos y embalajes: formato por descripción y rango de kilos', () => {
   assert.equal(revisarPartida({ producto: 'HARLOW CE 20*120 RECT 1.68 MT2/ 24 CJ-TAR 08', cantidad: 2, um: 'CJ', kg: 90 }).fuera_de_rango, true);
   assert.equal(revisarPartida({ sku: 'P061301635P3', producto: 'PEGAPISO', cantidad: 250 }).tarimas_calc, 2);
   assert.equal(EMBALAJES.length, 46);
+});
+test('Catálogos de Nacional (Seguimiento + Fletes)', async () => {
+  const leer = async (n) => leerLibro(new Uint8Array(readFileSync(new URL(n, import.meta.url))));
+  const seg = desdeSeguimiento(await leer('./seguimiento-ejemplo.xlsx')), fle = desdeFletes(await leer('./fletes-ejemplo.xlsx'));
+  assert.equal(seg.transportistas.length, 2);
+  assert.equal(seg.destinos.length, 4);
+  assert.equal(seg.destinos.find((d) => d.destino === 'LEON').dias, null); // #N/A → vacío
+  const r = combinarCatalogos({ seguimiento: seg, fletes: fle, actuales: { transportistas: [{ nombre: 'FLETES DEL BAJÍO', url: 'https://espejo', usuario: 'u' }] } });
+  const fb = r.transportistas.find((t) => /BAJIO/i.test(t.razon_social || ''));
+  assert.equal(fb.url, 'https://espejo');            // conserva la cuenta espejo
+  assert.equal(fb.plazo_pago, 30);                   // razón social de Fletes sin «S.A. de C.V.» empata
+  assert.equal(r.transportistas.find((t) => t.nombre === 'Transportes Ejemplo').plazo_pago, 60);
+  const saltillo = r.tarifas.find((t) => t.destino === 'SALTILLO');
+  assert.deepEqual([saltillo.tarifa, saltillo.tarifa_fletes, saltillo.dias], [530, 560, 1]);
+  assert.equal(r.clientes.find((c) => c.num === '9101').clasificacion, 'NACIONAL');
+  assert.equal(r.clientes.find((c) => c.nombre === 'Showroom Polanco').clasificacion, 'SIN FLETE');
+  assert.equal(tarifaPara(r.tarifas, ['Saltillo']).tarifa, 530);
+  assert.equal(tarifaPara(r.tarifas, ['Saltillo', 'Monterrey.']).tarifa, 600); // varias paradas: la más cara; sin importar puntos
+  assert.equal(clientePara(r.clientes, { cliente: 'Interceramic Norte', paradas: [] }).customer, 'ANA PRUEBA');
 });

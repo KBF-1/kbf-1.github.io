@@ -1,8 +1,8 @@
 /* Pantalla del almacén: tablero tipo aeropuerto, sin contraseña. Solo lee lc_pantalla, la copia pública de cada folio
    (sin tarifas, operador, placas, material, direcciones ni nombres de clientes de Última Milla).
    Se refresca cada 30 segundos y pasa de página sola si no caben todos los folios. */
-import * as fb from './firebase-sdk.js?v=10';
-import { ESTATUS } from './reglas.js?v=10';
+import * as fb from './firebase-sdk.js?v=12';
+import { ESTATUS } from './reglas.js?v=12';
 
 const CFG = window.LC_CONFIG;
 const app = fb.initializeApp(CFG.firebase, 'pantalla');
